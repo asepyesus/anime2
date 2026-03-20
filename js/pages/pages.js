@@ -186,35 +186,33 @@ Pages.browse = async function({ page='1', q='' }) {
     let cards = [];
 
     if (q) {
-      // Search mode
+      // Search mode - /search/<query> returns { results: [...] }
       const res  = await fetch(`${API_BASE}/search/${encodeURIComponent(q)}`);
       const data = await res.json();
-      const raw  = data.result?.data || data.result || [];
-      cards = Array.isArray(raw) ? raw.map(item => ({
-        slug: item.slug, title: item.title,
-        thumbnail: item.thumbnail, eps: item.eps, type: item.type || 'Donghua',
-      })) : [];
+      const raw  = data.results || data.result?.data || data.result || [];
+      cards = Array.isArray(raw) ? raw : [];
     } else {
-      // All donghua - use homepage API, combine all sections
-      const res  = await fetch(`${API_BASE}/`);
+      // All donghua - /anime?page= returns { results: [...] }
+      const res  = await fetch(`${API_BASE}/anime?page=${pg}`);
       const data = await res.json();
-      const sections = data.results || [];
-      // Collect all unique cards from all sections
-      const seen = new Set();
-      sections.forEach(sec => {
-        (sec.cards || []).forEach(card => {
-          if (card.slug && !seen.has(card.slug)) {
-            seen.add(card.slug);
-            cards.push(card);
-          }
-        });
-      });
+      cards = data.results || [];
     }
 
     const grid = document.getElementById('browse-grid');
     grid.innerHTML = cards.length
       ? `<div class="cards-grid">${cards.map(UI.card).join('')}</div>`
       : `<p class="empty">Tidak ada hasil.</p>`;
+
+    // Show pagination
+    if (!q) {
+      const pgEl = document.getElementById('browse-pg');
+      if (pgEl) {
+        pgEl.innerHTML = renderPagination(pg, 50); // anichin has many pages
+        pgEl.querySelectorAll('[data-page]').forEach(btn => {
+          btn.addEventListener('click', () => Router.go(`/browse?page=${btn.dataset.page}`));
+        });
+      }
+    }
 
   } catch(e) {
     console.error(e);
@@ -264,6 +262,11 @@ Pages.detail = async function({ slug }) {
     }
 
     if (!info || !info.title) throw new Error('not found');
+    
+    // API uses "episode" (singular) not "episodes"
+    if (!info.episodes && info.episode) {
+      info.episodes = info.episode;
+    }
 
     const inWL = await window.DB?.inWatchlist(slug) || false;
 
@@ -347,28 +350,36 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
 
   try {
     // Get video sources for this episode
+    // Fetch episode info and video sources in parallel
     const [vsRes, epRes] = await Promise.all([
       fetch(`${API_BASE}/video-source/${encodeURIComponent(slug)}`),
       fetch(`${API_BASE}/episode/${encodeURIComponent(slug)}`),
     ]);
     
-    const vsData  = await vsRes.json();
-    const epData  = await epRes.json();
-    
-    // Normalize sources - API returns various formats
-    const rawResult = vsData.result || {};
-    let sources = [];
-    if (Array.isArray(rawResult)) {
-      sources = rawResult;
-    } else if (Array.isArray(rawResult.sources)) {
-      sources = rawResult.sources;
-    } else if (Array.isArray(rawResult.servers)) {
-      sources = rawResult.servers;
-    } else if (rawResult.url || rawResult.src) {
-      sources = [rawResult];
-    }
-
+    const vsData = await vsRes.json();
+    const epData = await epRes.json();
     const epInfo = epData.result || {};
+    
+    // Build sources list
+    let sources = [];
+    
+    // Try API video sources first
+    if (vsRes.ok && vsData.result) {
+      const raw = vsData.result;
+      if (Array.isArray(raw)) sources = raw;
+      else if (Array.isArray(raw.sources)) sources = raw.sources;
+      else if (Array.isArray(raw.servers)) sources = raw.servers;
+      else if (raw.url || raw.src) sources = [raw];
+    }
+    
+    // Always add Anichin embed as fallback (works for all episodes)
+    // Anichin episode page URL pattern: https://anichin.moe/<slug>/
+    const anichinEmbed = `https://anichin.moe/${slug}/`;
+    sources.push({ 
+      name: 'Anichin', 
+      src: anichinEmbed,
+      url: anichinEmbed 
+    });
 
     // Get series info for episode list
     let seriesEps = [];
@@ -601,16 +612,21 @@ async function doSearch(q) {
     const res  = await fetch(`${API_BASE}/search/${encodeURIComponent(q)}`);
     const data = await res.json();
     // API returns { result: { data: [...] } } or { result: [...] }
+    // Search returns { results: [...], query: "...", total: N }
     let items = [];
-    if (Array.isArray(data.result)) {
+    if (Array.isArray(data.results)) {
+      items = data.results;
+    } else if (Array.isArray(data.result)) {
       items = data.result;
     } else if (Array.isArray(data.result?.data)) {
       items = data.result.data;
-    } else if (Array.isArray(data.results)) {
-      // Homepage format - flatten sections
-      data.results.forEach(sec => { if(sec.cards) items.push(...sec.cards); });
     }
-    const cards = items.map(item=>({ slug:item.slug, title:item.title, thumbnail:item.thumbnail, eps:item.eps, type:item.type||'Donghua' }));
+    const cards = items.map(item=>({ 
+      slug: item.slug, title: item.title || item.headline, 
+      thumbnail: item.thumbnail, eps: item.eps, 
+      type: item.type || 'Donghua',
+      status: item.status,
+    }));
     el.innerHTML = cards.length
       ? `<p class="s-count">${cards.length} hasil untuk "<b>${q}</b>"</p><div class="cards-grid">${cards.map(UI.card).join('')}</div>`
       : `<p class="empty">Tidak ada hasil untuk "<b>${q}</b>"</p>`;
