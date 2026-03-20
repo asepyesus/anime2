@@ -241,66 +241,76 @@ Pages.detail = async function({ slug }) {
   App.page(`<div class="center-spinner"><div class="spinner"></div></div>`);
 
   try {
-    // Try the slug directly first, if it fails try stripping episode suffix
-    let res  = await fetch(`${API_BASE}/${encodeURIComponent(slug)}`);
-    let data = await res.json();
-    let info = data.result;
+    // Cards from homepage/browse use episode slugs like:
+    //   "perfect-world-episode-260-subtitle-indonesia"
+    // But the API detail endpoint needs series slug like:
+    //   "perfect-world"
+    // From debug: series slug is everything BEFORE "-episode-N"
 
-    // If not found or no episodes, try extracting series slug from episode slug
-    // Episode slugs look like: "series-name-episode-XX-subtitle-indonesia"
-    if (!info || !info.title) {
-      // Strip common suffixes to get series slug
-      const seriesSlug = slug
-        .replace(/-episode-\d+.*$/i, '')
-        .replace(/-subtitle-indonesia.*$/i, '')
-        .replace(/-tamat.*$/i, '');
-      if (seriesSlug !== slug) {
-        res  = await fetch(`${API_BASE}/${encodeURIComponent(seriesSlug)}`);
-        data = await res.json();
-        info = data.result;
-      }
+    // Step 1: extract series slug
+    const seriesSlug = slug
+      .split('-episode-')[0]        // "perfect-world-episode-260..." -> "perfect-world"
+      .split('-subtitle-indonesia')[0]
+      .split('-tamat')[0]
+      .replace(/-+$/, '');           // trim trailing dashes
+
+    console.log('[Detail] slug:', slug, '-> seriesSlug:', seriesSlug);
+
+    // Step 2: try series slug, then original
+    const toTry = [...new Set([seriesSlug, slug])].filter(Boolean);
+    let info = null, finalSlug = null;
+
+    for (const s of toTry) {
+      try {
+        const r = await fetch(API_BASE + '/' + s);
+        const d = await r.json();
+        console.log('[Detail] tried:', s, 'result keys:', Object.keys(d.result || {}));
+        if (d.result && (d.result.title || d.result.episode || d.result.status)) {
+          info = d.result;
+          finalSlug = s;
+          break;
+        }
+      } catch(e) { console.warn('[Detail]', s, e.message); }
     }
 
-    if (!info || !info.title) throw new Error('not found');
-    
-    // API uses "episode" (singular) not "episodes"
-    if (!info.episodes && info.episode) {
-      info.episodes = info.episode;
-    }
+    if (!info) throw new Error('not found');
 
-    const inWL = await window.DB?.inWatchlist(slug) || false;
+    // Normalize field names (API uses "episode" not "episodes")
+    const episodes = info.episode || info.episodes || [];
+    const title    = info.title || info.name || slug.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+    const thumb    = info.thumbnail || info.poster || '';
+
+    const inWL = await window.DB?.inWatchlist(finalSlug) || false;
 
     App.page(`
       <div class="detail-pg">
-        <div class="detail-hero" style="--bg:url('${info.thumbnail||''}')">
+        <div class="detail-hero" style="--bg:url('${thumb}')">
           <div class="detail-fade"></div>
           <div class="detail-body">
             <div class="detail-poster">
-              ${info.thumbnail?`<img src="${info.thumbnail}" alt="${info.title}"/>`:`<div class="detail-np">${info.title?.charAt(0)}</div>`}
+              ${thumb ? `<img src="${thumb}" alt="${title}"/>` : `<div class="detail-np">${title.charAt(0)}</div>`}
             </div>
             <div class="detail-info">
               <span class="detail-badge">DONGHUA</span>
-              <h1>${info.title||slug}</h1>
+              <h1>${title}</h1>
               <div class="detail-meta">
-                ${info.type?`<span>${info.type}</span>`:''}
-                ${info.status?`<span>${info.status}</span>`:''}
-                ${info.released?`<span>${info.released}</span>`:''}
+                ${info.type   ? `<span>${info.type}</span>`   : ''}
+                ${info.status ? `<span>${info.status}</span>` : ''}
+                ${info.country? `<span>${info.country}</span>`: ''}
                 ${info.duration?`<span>${info.duration}</span>`:''}
+                ${episodes.length ? `<span>${episodes.length} Episode</span>` : ''}
               </div>
-              ${info.genres?.length?`<div class="detail-genres">${info.genres.map(g=>`<span class="genre-chip">${g.name||g}</span>`).join('')}</div>`:''}
-              <p class="detail-overview">${info.synopsis||info.description||'Tidak ada sinopsis.'}</p>
+              ${info.genres?.length ? `<div class="detail-genres">${info.genres.map(g=>`<span class="genre-chip">${g.name||g}</span>`).join('')}</div>` : ''}
+              <p class="detail-overview">${info.synopsis||info.description||''}</p>
               <div class="detail-btns">
-                ${info.episodes?.length
-                  ? `<a class="btn-watch-now" data-go="/watch?slug=${encodeURIComponent(info.episodes[info.episodes.length-1].slug)}&back=${encodeURIComponent(seriesSlug)}">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                      Tonton Episode Terbaru
-                    </a>
-                    <a class="btn-ghost" style="font-size:.82rem;padding:.55rem 1rem" data-go="/watch?slug=${encodeURIComponent(info.episodes[0].slug)}&back=${encodeURIComponent(seriesSlug)}">
-                      Ep 1
-                    </a>`
-                  : ''
-                }
-                <button class="btn-wl${inWL?' saved':''}" id="wl-btn" data-slug="${slug}">
+                ${episodes.length ? `
+                  <a class="btn-watch-now" data-go="/watch?slug=${encodeURIComponent(episodes[episodes.length-1].slug)}&back=${encodeURIComponent(finalSlug)}">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                    Episode Terbaru
+                  </a>
+                  ${episodes.length > 1 ? `<a class="btn-ghost" style="font-size:.82rem;padding:.55rem 1rem" data-go="/watch?slug=${encodeURIComponent(episodes[0].slug)}&back=${encodeURIComponent(finalSlug)}">Ep 1</a>` : ''}
+                ` : ''}
+                <button class="btn-wl${inWL?' saved':''}" id="wl-btn">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="${inWL?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
                   ${inWL?'Tersimpan':'Watchlist'}
                 </button>
@@ -309,14 +319,14 @@ Pages.detail = async function({ slug }) {
           </div>
         </div>
 
-        ${info.episodes?.length ? `
+        ${episodes.length ? `
           <section class="det-sec">
-            <h2>Daftar Episode <span class="ep-count">${info.episodes.length} Episode</span></h2>
-            <div class="ep-grid" id="ep-grid">
-              ${info.episodes.map((ep,i)=>`
-                <a class="ep-card" data-go="/watch?slug=${encodeURIComponent(ep.slug)}&back=${encodeURIComponent(seriesSlug)}">
-                  <div class="ep-num">Ep ${ep.episode_number||i+1}</div>
-                  <div class="ep-title">${ep.title||`Episode ${ep.episode_number||i+1}`}</div>
+            <h2>Daftar Episode <span class="ep-count">${episodes.length} Episode</span></h2>
+            <div class="ep-grid">
+              ${episodes.map((ep,i)=>`
+                <a class="ep-card" data-go="/watch?slug=${encodeURIComponent(ep.slug)}&back=${encodeURIComponent(finalSlug)}">
+                  <div class="ep-num">Ep ${ep.episode||i+1}</div>
+                  <div class="ep-title">${ep.subtitle||ep.name||ep.title||'Episode '+(ep.episode||i+1)}</div>
                 </a>
               `).join('')}
             </div>
@@ -325,20 +335,35 @@ Pages.detail = async function({ slug }) {
       </div>
     `);
 
-    // Watchlist button
+    // Watchlist
     document.getElementById('wl-btn')?.addEventListener('click', async () => {
       if (!window.Auth?.current) { Router.go('/auth'); return; }
       try {
-        const added = await window.DB.watchlistToggle({ slug:seriesSlug, title:info.title, thumbnail:info.thumbnail, type:'donghua' });
+        const added = await window.DB.watchlistToggle({ slug:finalSlug, title, thumbnail:thumb, type:'donghua' });
         const btn = document.getElementById('wl-btn');
-        btn.className = 'btn-wl' + (added?' saved':'');
-        btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="${added?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg> ${added?'Tersimpan':'Watchlist'}`;
-        App.toast(added?'Ditambahkan ke watchlist':'Dihapus dari watchlist');
+        if (btn) {
+          btn.className = 'btn-wl' + (added?' saved':'');
+          btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="${added?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg> ${added?'Tersimpan':'Watchlist'}`;
+        }
+        App.toast(added ? 'Ditambahkan ke watchlist' : 'Dihapus dari watchlist');
       } catch { Router.go('/auth'); }
     });
 
-  } catch {
-    App.page(`<div class="pg-err"><h2>Konten tidak ditemukan</h2><a data-go="/browse" class="btn-main">Kembali</a></div>`);
+  } catch(e) {
+    // Show debug info on screen for HP users
+    App.page(`
+      <div class="pg-err">
+        <h2>Debug Info</h2>
+        <div style="background:#0d0d1a;border:1px solid #333;border-radius:8px;padding:1rem;margin:1rem 0;font-family:monospace;font-size:.75rem;text-align:left;word-break:break-all;max-width:500px">
+          <div style="color:#e8365d;margin-bottom:.5rem">Error: ${e.message}</div>
+          <div style="color:#888">Slug asli: <span style="color:#eee">${slug}</span></div>
+          <div style="color:#888;margin-top:.25rem">Series slug: <span style="color:#eee">${slug.split('-episode-')[0]}</span></div>
+          <div style="color:#888;margin-top:.25rem">API URL dicoba: <span style="color:#eee">${API_BASE}/${slug.split('-episode-')[0]}</span></div>
+        </div>
+        <p style="color:var(--t3);font-size:.8rem;max-width:400px;text-align:center">Screenshot info di atas dan kirim ke developer</p>
+        <a data-go="/browse" class="btn-main" style="margin-top:1.5rem">Kembali</a>
+      </div>
+    `);
   }
 };
 
