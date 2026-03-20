@@ -411,17 +411,22 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
     let seriesTitle = epInfo.anime_title || epInfo.series_title || epInfo.title || '';
     if (back) {
       try {
-        const sRes  = await fetch(`${API_BASE}/${encodeURIComponent(back)}`);
+        const sRes  = await fetch(`${API_BASE}/${back}`);
         const sData = await sRes.json();
-        seriesEps   = sData.result?.episodes || [];
-        seriesTitle = sData.result?.title || seriesTitle;
-      } catch {}
+        const r = sData.result || {};
+        // API uses "episode" (singular) not "episodes"
+        const rawEps = r.episode || r.episodes || [];
+        seriesEps   = Array.isArray(rawEps) ? rawEps : [];
+        seriesTitle = r.title || r.name || seriesTitle;
+      } catch(e) { console.warn('series fetch failed', e); }
     }
 
     // Save to history
     _saveHistory({ slug:back||slug, epSlug:slug, title:seriesTitle, thumbnail:epInfo.thumbnail||epInfo.anime_thumbnail||'', ep:epInfo.episode_number||ep });
 
     // Find prev/next
+    // Safety: ensure seriesEps is always an array
+    if (!Array.isArray(seriesEps)) seriesEps = [];
     const curIdx  = seriesEps.findIndex(e=>e.slug===slug);
     const prevEp  = curIdx > 0 ? seriesEps[curIdx-1] : null;
     const nextEp  = curIdx < seriesEps.length-1 ? seriesEps[curIdx+1] : null;
