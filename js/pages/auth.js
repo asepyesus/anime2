@@ -1,4 +1,6 @@
 Pages.auth = async function({ m='login' }) {
+  // If already logged in, redirect
+  if (window._user) { Router.go(sessionStorage.getItem('_ar')||'/home'); return; }
   UI.renderNav();
   UI.setPage(`
     <div class="auth-pg">
@@ -29,7 +31,7 @@ function loginForm() {
       Masuk dengan Google
     </button>
     <div class="auth-or"><span>atau</span></div>
-    <div class="auth-field"><label>Username / Email</label><input type="text" id="af-email" placeholder="email atau 'KIKI ADMIN'"/></div>
+    <div class="auth-field"><label>Email</label><input type="email" id="af-email" placeholder="email@kamu.com" autocomplete="email"/></div>
     <div class="auth-field"><label>Password</label><input type="password" id="af-pass" placeholder="password"/></div>
     <div class="auth-err" id="af-err"></div>
     <button class="btn-auth" id="af-submit">Masuk</button>
@@ -55,8 +57,28 @@ function bindAuthForm(mode) {
   const setErr = (msg) => { const e=document.getElementById('af-err'); if(e) e.textContent=msg; };
   const setLoad = (v) => { const b=document.getElementById('af-submit'); if(b){b.disabled=v;b.style.opacity=v?.6:1;} };
 
+  async function afterLogin() {
+    // Wait max 4s for Firebase auth state to update
+    const dest = sessionStorage.getItem('_ar') || '/home';
+    sessionStorage.removeItem('_ar');
+    let waited = 0;
+    const checkUser = () => new Promise(resolve => {
+      const unsub = window._authUnsub || (() => {});
+      // Poll every 200ms up to 4 seconds
+      const iv = setInterval(() => {
+        waited += 200;
+        if (window._user || waited >= 4000) {
+          clearInterval(iv);
+          resolve();
+        }
+      }, 200);
+    });
+    await checkUser();
+    Router.go(dest);
+  }
+
   document.getElementById('g-btn')?.addEventListener('click', async () => {
-    try { await window.Auth.google(); Router.go(sessionStorage.getItem('_ar')||'/home'); sessionStorage.removeItem('_ar'); }
+    try { await window.Auth.google(); await afterLogin(); }
     catch(e) { setErr(errMsg(e.code)); }
   });
   document.getElementById('af-submit')?.addEventListener('click', async () => {
@@ -66,11 +88,11 @@ function bindAuthForm(mode) {
       const name = document.getElementById('af-name')?.value.trim();
       if (!name||!email||!pass) return setErr('Isi semua kolom.');
       if (pass.length<6) return setErr('Password minimal 6 karakter.');
-      try { setLoad(true); await window.Auth.register(email,pass,name); Router.go('/home'); }
+      try { setLoad(true); await window.Auth.register(email,pass,name); await afterLogin(); }
       catch(e) { setErr(errMsg(e.code)); } finally { setLoad(false); }
     } else {
       if (!email||!pass) return setErr('Isi semua kolom.');
-      try { setLoad(true); await window.Auth.login(email,pass); Router.go(sessionStorage.getItem('_ar')||'/home'); sessionStorage.removeItem('_ar'); }
+      try { setLoad(true); await window.Auth.login(email,pass); await afterLogin(); }
       catch(e) { setErr(errMsg(e.code)); } finally { setLoad(false); }
     }
   });
@@ -363,25 +385,66 @@ Pages.admin = async function({ tab='dash' }) {
 function fmtAdminTime(ts) {
   try { const d=ts?.toDate?ts.toDate():new Date(ts); return d.toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}); } catch{return '';}
 }
-function fmtTime(ts) {
-  if(!ts)return''; try { const d=ts.toDate?ts.toDate():new Date(ts); const diff=(Date.now()-d.getTime())/1000; if(diff<60)return'Baru saja'; if(diff<3600)return`${Math.floor(diff/60)} menit lalu`; if(diff<86400)return`${Math.floor(diff/3600)} jam lalu`; return`${Math.floor(diff/86400)} hari lalu`; } catch{return'';}
-}
-function esc(t=''){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 Pages.support = async function() {
   UI.renderNav();
   UI.setPage(`
     <div class="support-pg">
       <div class="support-hero">
+        <div class="supp-logo-wrap">
+          <div class="supp-logo-click" id="supp-logo-reveal">
+            <svg viewBox="0 0 60 60" fill="none" width="56" height="56">
+              <rect width="60" height="60" rx="14" fill="#E8365D"/>
+              <path d="M18 20v20l10-5 4 8 6-3-4-8 10-5L18 20z" fill="white" stroke="white" stroke-width="0.5" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
         <h1>Bantuan</h1>
-        <p>Temukan jawaban atau kirim laporan langsung ke tim kami.</p>
+        <p>Temukan jawaban atau hubungi tim kami langsung.</p>
       </div>
+
+      <!-- HIDDEN CONTACT - revealed on logo click -->
+      <div class="supp-contact-hidden" id="supp-contact-reveal" style="display:none">
+        <div class="supp-contact-card">
+          <h3>Hubungi Tim</h3>
+          <div class="supp-contacts">
+            <a class="supp-contact-item" href="https://instagram.com/kiki_fzl1" target="_blank" rel="noopener">
+              <div class="sci-icon ig">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+              </div>
+              <div class="sci-info">
+                <span class="sci-label">Instagram</span>
+                <span class="sci-val">@kiki_fzl1</span>
+              </div>
+            </a>
+            <a class="supp-contact-item" href="https://t.me/kyshiro1" target="_blank" rel="noopener">
+              <div class="sci-icon tg">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+              </div>
+              <div class="sci-info">
+                <span class="sci-label">Telegram</span>
+                <span class="sci-val">@kyshiro1</span>
+              </div>
+            </a>
+            <a class="supp-contact-item" href="mailto:kikimodesad8@gmail.com">
+              <div class="sci-icon em">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+              </div>
+              <div class="sci-info">
+                <span class="sci-label">Email</span>
+                <span class="sci-val">kikimodesad8@gmail.com</span>
+              </div>
+            </a>
+          </div>
+        </div>
+      </div>
+
       <div class="support-cards">
         ${[
-          ['Video tidak bisa diputar','Pastikan YouTube tidak diblokir di jaringanmu. Coba browser lain atau matikan VPN jika aktif.'],
-          ['Masalah login / daftar','Pastikan email dan password benar. Untuk login Google, izinkan popup dari browser kamu.'],
-          ['Masalah pembayaran','Hubungi kami dengan menyertakan bukti transaksi. Kami akan memproses dalam 1x24 jam.'],
-          ['Laporkan bug','Temukan tampilan rusak atau fitur bermasalah? Ceritakan di form bawah.'],
+          ['Video tidak bisa diputar','Coba ganti ke Server 2, 3, atau 4 di halaman tonton. Setiap server punya konten berbeda.'],
+          ['Masalah login / daftar','Pastikan email dan password benar. Untuk login Google, izinkan popup dari browser.'],
+          ['Masalah pembayaran','Hubungi kami dengan menyertakan bukti transaksi. Diproses dalam 1x24 jam.'],
+          ['Laporkan bug','Temukan tampilan rusak atau fitur bermasalah? Klik logo di atas untuk menghubungi kami.'],
         ].map(([t,d])=>`
           <div class="support-card">
             <h3>${t}</h3>
@@ -389,12 +452,14 @@ Pages.support = async function() {
           </div>
         `).join('')}
       </div>
+
       <div class="support-faq-title">Pertanyaan Umum</div>
       ${[
-        ['Bagaimana cara upgrade Premium?','Klik tombol Premium di navbar, pilih paket, lalu pilih metode pembayaran. Akun akan diupgrade otomatis setelah pembayaran terkonfirmasi.'],
-        ['Apakah ada aplikasi Android?','Saat ini tersedia via browser. Kamu bisa akses dari HP dengan tampilan yang sudah mobile-friendly.'],
-        ['Kenapa komentar saya dihapus?','Komentar yang melanggar aturan komunitas dapat dihapus oleh admin tanpa pemberitahuan.'],
-        ['Data saya aman?','Kicen Xensai menggunakan Firebase Authentication dan Firestore dari Google untuk keamanan data.'],
+        ['Bagaimana cara upgrade Premium?','Klik tombol Premium di navbar, pilih paket, lalu pilih metode pembayaran.'],
+        ['Kenapa video tidak bisa diputar?','Coba ganti server. Tersedia 4 server berbeda di bawah player.'],
+        ['Apakah ada aplikasi Android?','Saat ini tersedia via browser. Tampilan sudah dioptimalkan untuk mobile.'],
+        ['Kenapa komentar saya dihapus?','Komentar yang melanggar aturan komunitas dihapus oleh admin.'],
+        ['Data saya aman?','Kicen Xensai menggunakan Firebase Authentication dari Google.'],
       ].map(([q,a])=>`
         <div class="faq-item">
           <button class="faq-q">
@@ -404,17 +469,29 @@ Pages.support = async function() {
           <div class="faq-a">${a}</div>
         </div>
       `).join('')}
+
       <div class="support-contact">
         <h3>Kirim Laporan</h3>
         <p>Tidak menemukan jawaban? Tim kami merespons dalam 1x24 jam.</p>
         <textarea id="supp-msg" rows="4" placeholder="Ceritakan masalah atau pertanyaan kamu..."></textarea>
         <div style="display:flex;align-items:center;gap:1rem;margin-top:.75rem">
           <button class="btn-supp-send" id="supp-send">Kirim</button>
-          <span id="supp-status" style="font-size:.8rem;color:var(--text-2)"></span>
+          <span id="supp-status" style="font-size:.8rem;color:var(--t2)"></span>
         </div>
       </div>
     </div>
   `);
+
+  // Logo click reveals contact info
+  document.getElementById('supp-logo-reveal')?.addEventListener('click', () => {
+    const el = document.getElementById('supp-contact-reveal');
+    if (el) {
+      el.style.display = el.style.display === 'none' ? 'block' : 'none';
+      if (el.style.display === 'block') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  });
 
   document.querySelectorAll('.faq-q').forEach(btn=>{
     btn.addEventListener('click',()=>{

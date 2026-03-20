@@ -1,4 +1,6 @@
 Pages.landing = async function() {
+  // FIX: If user already logged in, go straight to home
+  if (window._user) { Router.go('/home'); return; }
   UI.renderNav();
   document.getElementById('app-footer').innerHTML = '';
 

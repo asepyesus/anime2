@@ -29,6 +29,8 @@ const Auth = {
       } else {
         this.current = null;
       }
+      // Always sync _user on window so pages can detect auth state
+      window._user = this.current;
       cb(this.current);
     });
   },

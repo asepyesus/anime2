@@ -1,4 +1,8 @@
 Pages.home = async function() {
+  // FIX: Wait for auth to be ready before checking user
+  let tries = 0;
+  while (window._user === undefined && tries < 20) { await new Promise(r=>setTimeout(r,100)); tries++; }
+  
   UI.renderNav();
   const user = window._user;
   if (!user) { Router.go('/'); return; }

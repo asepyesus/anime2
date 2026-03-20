@@ -151,6 +151,36 @@ function updateWLBtn(btn, inWL) {
   btn.style.color = inWL ? 'var(--teal)' : '';
 }
 
+
+// Build multiple video embed sources for maximum availability
+function buildVideoSources(id, cat, type, ep) {
+  const epNum = parseInt(ep) || 1;
+  const sources = [];
+
+  if (cat === 'anime') {
+    // Anime sources using MAL ID
+    sources.push(`https://vidsrc.to/embed/anime/${id}/${epNum}`);
+    sources.push(`https://vidsrc.xyz/embed/anime?mal=${id}&ep=${epNum}`);
+    sources.push(`https://2embed.skin/embed/anime?mal=${id}&ep=${epNum}`);
+    sources.push(`https://multiembed.mov/directstream.php?video_id=${id}&tmdb=0&s=1&e=${epNum}`);
+  } else {
+    // Drakor / Dracin / Donghua — use TMDB ID
+    const mediaType = type === 'movie' ? 'movie' : 'tv';
+    if (mediaType === 'movie') {
+      sources.push(`https://vidsrc.to/embed/movie/${id}`);
+      sources.push(`https://vidsrc.xyz/embed/movie?tmdb=${id}`);
+      sources.push(`https://2embed.skin/embed/${id}`);
+      sources.push(`https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`);
+    } else {
+      sources.push(`https://vidsrc.to/embed/tv/${id}/${epNum}`);
+      sources.push(`https://vidsrc.xyz/embed/tv?tmdb=${id}&season=1&episode=${epNum}`);
+      sources.push(`https://2embed.skin/embedtv/${id}&s=1&e=${epNum}`);
+      sources.push(`https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=1&e=${epNum}`);
+    }
+  }
+  return sources;
+}
+
 Pages.watch = async function({ id, type='tv', cat='anime', ep='1' }) {
   if (!id) { Router.go('/home'); return; }
   UI.renderNav();
@@ -168,24 +198,28 @@ Pages.watch = async function({ id, type='tv', cat='anime', ep='1' }) {
     // Save to history
     API.saveHistory({id,type:type||'tv',category:cat,title:data.title,poster:data.poster,rating:data.rating,year:data.year}, epNum);
 
-    const videoSrc = data.trailer
-      ? `https://www.youtube.com/embed/${data.trailer}?rel=0&modestbranding=1`
-      : null;
+    const videoSources = buildVideoSources(id, cat, type, epNum);
+    const primarySrc = videoSources[0];
 
     UI.setPage(`
       <div class="watch-layout">
 
         <!-- LEFT: PLAYER + INFO + COMMENTS -->
         <div class="watch-main">
-          <div class="watch-player">
-            ${videoSrc
-              ? `<iframe src="${videoSrc}" frameborder="0" allow="autoplay;fullscreen;picture-in-picture" allowfullscreen title="${data.title}"></iframe>`
-              : `<div class="watch-no-vid">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="4"/><path d="m10 8 6 4-6 4V8z"/></svg>
-                  <p>Tidak ada video tersedia</p>
-                  <span>Konten ini belum memiliki sumber video</span>
-                </div>`
-            }
+          <div class="watch-player-wrap">
+            <iframe
+              id="watch-iframe"
+              src="${primarySrc}"
+              frameborder="0"
+              allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+              allowfullscreen
+              referrerpolicy="no-referrer"
+              title="${data.title} Episode ${epNum}"
+            ></iframe>
+          </div>
+          <div class="watch-src-bar">
+            <span class="wsb-label">Server:</span>
+            ${videoSources.map((src,i) => `<button class="wsrc-btn${i===0?' on':''}" data-src="${src}" data-idx="${i}">Server ${i+1}</button>`).join('')}
           </div>
 
           <!-- INFO BAR -->
@@ -294,6 +328,19 @@ Pages.watch = async function({ id, type='tv', cat='anime', ep='1' }) {
     wsToggle?.addEventListener('click', () => {
       const collapsed = wsText.classList.toggle('collapsed');
       wsToggle.textContent = collapsed ? 'Selengkapnya' : 'Lebih sedikit';
+    });
+
+    // Video server switcher
+    document.querySelectorAll('.wsrc-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const iframe = document.getElementById('watch-iframe');
+        if (iframe) {
+          iframe.src = btn.dataset.src;
+          document.querySelectorAll('.wsrc-btn').forEach(b => b.classList.remove('on'));
+          btn.classList.add('on');
+          UI.toast('Berganti ke ' + btn.textContent);
+        }
+      });
     });
 
     // Watchlist

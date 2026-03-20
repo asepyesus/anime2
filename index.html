@@ -34,14 +34,8 @@
     <div id="app-footer"></div>
   </div>
 
-  <!-- TOAST -->
   <div id="toast"></div>
 
-  <!-- MODAL OVERLAY -->
-  <div id="modal-bg"></div>
-  <div id="modal-box"></div>
-
-  <!-- Scripts -->
   <script src="js/config.js"></script>
   <script src="js/api.js"></script>
   <script src="js/router.js"></script>
@@ -49,40 +43,55 @@
 
   <script type="module">
     import { Auth, DB } from './js/firebase.js';
-    import { getFirestore, collection, getDocs, query, orderBy, limit, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, increment, setDoc, getDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-    import { getApps } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 
     window.Auth = Auth;
     window.DB = DB;
+    window._user = undefined; // undefined = not yet resolved, null = logged out, object = logged in
 
-    // Expose Firestore helpers globally for page scripts
-    window._fs = {
-      getFirestore, collection, getDocs, query, orderBy, limit, where,
-      onSnapshot, addDoc, deleteDoc, doc, updateDoc, increment,
-      setDoc, getDoc, serverTimestamp,
-      db: () => getFirestore(getApps()[0])
-    };
+    // FIX: Load scripts sequentially, register routes AFTER all scripts loaded
+    // This prevents Pages.xxx = undefined race condition
+    const pageScripts = [
+      'js/app.js',
+      'js/pages/landing.js',
+      'js/pages/home.js',
+      'js/pages/browse.js',  // contains: Pages.browse, Pages.detail, Pages.watch, Pages.search
+      'js/pages/auth.js',    // contains: Pages.auth, Pages.premium, Pages.profile, Pages.admin, Pages.support
+    ];
 
-    const pages = ['app','landing','home','browse','detail','watch','search','auth','premium','profile','admin','support'];
+    function loadScript(src) {
+      return new Promise((resolve) => {
+        const s = document.createElement('script');
+        s.src = src;
+        s.onload = resolve;
+        s.onerror = () => { console.warn('Failed to load:', src); resolve(); };
+        document.body.appendChild(s);
+      });
+    }
 
-    async function boot() {
+    window.addEventListener('DOMContentLoaded', async () => {
       window.Pages = {};
-      for (const p of pages) {
-        await new Promise((ok, fail) => {
-          const s = document.createElement('script');
-          s.src = p === 'app' ? `js/${p}.js` : `js/pages/${p}.js`;
-          s.onload = ok; s.onerror = () => { console.warn('skip', p); ok(); };
-          document.body.appendChild(s);
-        });
+
+      // Load all page scripts sequentially
+      for (const src of pageScripts) {
+        await loadScript(src);
       }
 
-      // Auth listener
-      Auth.init((user) => {
-        window._user = user;
-        UI.renderNav();
+      // FIX: Init auth and wait for first auth state before starting router
+      await new Promise(resolve => {
+        Auth.init((user) => {
+          window._user = user;
+          // Update nav on auth state changes
+          const nav = document.getElementById('app-nav');
+          if (nav && nav.innerHTML.trim()) {
+            UI.renderNav();
+          }
+          resolve(); // only resolve first time to unblock router start
+        });
+        // Safety timeout in case Firebase is slow
+        setTimeout(resolve, 3000);
       });
 
-      // Register routes
+      // FIX: Register routes AFTER all Pages.xxx are defined
       Router.on('/', Pages.landing);
       Router.on('/home', Pages.home);
       Router.on('/browse', Pages.browse);
@@ -94,18 +103,23 @@
       Router.on('/profile', Pages.profile);
       Router.on('/admin', Pages.admin);
       Router.on('/support', Pages.support);
-      Router.on('/404', () => {
+      Router.on('/404', async () => {
         UI.setPage(`<div class="pg-err"><h2>Halaman tidak ditemukan</h2><a data-go="/">Kembali</a></div>`);
       });
 
-      // Show app, hide splash after 2s
+      // Hide splash and start router
       setTimeout(() => {
         const splash = document.getElementById('splash');
-        if (splash) { splash.classList.add('out'); setTimeout(() => { splash.remove(); document.getElementById('root').style.display = ''; Router.start(); }, 600); }
+        if (splash) {
+          splash.classList.add('out');
+          setTimeout(() => {
+            splash.remove();
+            document.getElementById('root').style.display = '';
+            Router.start();
+          }, 600);
+        }
       }, 2200);
-    }
-
-    window.addEventListener('DOMContentLoaded', boot);
+    });
   </script>
 </body>
 </html>
