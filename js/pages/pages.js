@@ -450,47 +450,57 @@ function _esc(t = '') {
   return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-Pages.watch = async function({ slug, back='', ep='1' }) {
+Pages.watch = async function({ slug, back='' }) {
   if (!slug) { Router.go('/browse'); return; }
   App.nav();
   App.page(`<div class="center-spinner"><div class="spinner"></div></div>`, true);
 
   try {
-    // Fetch episode info + series info in parallel
-    const [epRes, sRes] = await Promise.all([
-      fetch(`${API_BASE}/episode/${slug}`),
-      back ? fetch(`${API_BASE}/${back}`) : Promise.resolve(null),
-    ]);
-
+    // Fetch episode + series info
+    const epRes = await fetch(`${API_BASE}/episode/${slug}`);
     const epData = await epRes.json();
     const epInfo = epData.result || {};
 
-    // Normalize series episodes
+    // Get series episodes for sidebar
     let seriesEps = [];
-    let seriesTitle = epInfo.anime_title || epInfo.series_title || epInfo.title || '';
-    if (sRes) {
-      const sData = await sRes.json();
-      const r = sData.result || {};
-      const raw = r.episode || r.episodes || [];
-      seriesEps   = Array.isArray(raw) ? raw : [];
-      seriesTitle = r.title || r.name || seriesTitle;
+    let seriesTitle = '';
+    if (back) {
+      try {
+        const sRes  = await fetch(`${API_BASE}/${back}`);
+        const sData = await sRes.json();
+        const r     = sData.result || {};
+        // API returns "episode" (singular) as array
+        const raw   = r.episode || r.episodes || [];
+        seriesEps   = Array.isArray(raw) ? raw : [];
+        seriesTitle = typeof r.title === 'string' ? r.title : '';
+      } catch {}
     }
 
-    // Find prev/next episode
+    // epInfo.episode is episode NUMBER (string like "162"), not array
+    const epNum = typeof epInfo.episode === 'string' || typeof epInfo.episode === 'number'
+      ? String(epInfo.episode)
+      : '?';
+
+    // seriesTitle fallback from epInfo
+    if (!seriesTitle) {
+      seriesTitle = typeof epInfo.anime_title === 'string' ? epInfo.anime_title
+        : typeof epInfo.series_title === 'string' ? epInfo.series_title
+        : typeof epInfo.title === 'string' ? epInfo.title
+        : back.replace(/-/g,' ').replace(/\w/g,c=>c.toUpperCase());
+    }
+
+    // Prev / Next episode in sidebar list
     const curIdx = seriesEps.findIndex(e => e.slug === slug);
     const prevEp = curIdx > 0 ? seriesEps[curIdx - 1] : null;
-    const nextEp = curIdx < seriesEps.length - 1 ? seriesEps[curIdx + 1] : null;
-    const epNum  = epInfo.episode || ep || '?';
+    const nextEp = curIdx >= 0 && curIdx < seriesEps.length - 1 ? seriesEps[curIdx + 1] : null;
 
-    // The Anichin embed URL - direct episode page
-    // Use anichin.care (mirror) which allows iframe better than .moe
-    const embedUrl = `https://anichin.care/${slug}/`;
+    // Embed URL — use anichin.moe direct episode page
+    const embedUrl = `https://anichin.moe/${slug}/`;
 
     App.page(`
       <div class="watch-pg">
         <div class="watch-main">
 
-          <!-- PLAYER: Anichin embed -->
           <div class="watch-player">
             <iframe
               id="watch-iframe"
@@ -500,33 +510,27 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
               allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
               allowfullscreen
               referrerpolicy="no-referrer"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation allow-modals"
             ></iframe>
           </div>
 
-          <!-- EP NAVIGATION -->
           <div class="ep-nav-bar">
             ${prevEp
-              ? `<a class="ep-nav-btn" data-go="/watch?slug=${encodeURIComponent(prevEp.slug)}&back=${encodeURIComponent(back)}">← Ep Sebelumnya</a>`
-              : `<span></span>`
-            }
-            <span class="ep-nav-info">${seriesTitle ? seriesTitle + ' · ' : ''}Ep ${epNum}</span>
+              ? `<a class="ep-nav-btn" data-go="/watch?slug=${encodeURIComponent(prevEp.slug)}&back=${encodeURIComponent(back)}">← Sebelumnya</a>`
+              : `<span></span>`}
+            <span class="ep-nav-info">${seriesTitle} · Ep ${epNum}</span>
             ${nextEp
-              ? `<a class="ep-nav-btn next" data-go="/watch?slug=${encodeURIComponent(nextEp.slug)}&back=${encodeURIComponent(back)}">Ep Selanjutnya →</a>`
-              : `<span></span>`
-            }
+              ? `<a class="ep-nav-btn next" data-go="/watch?slug=${encodeURIComponent(nextEp.slug)}&back=${encodeURIComponent(back)}">Selanjutnya →</a>`
+              : `<span></span>`}
           </div>
 
-          <!-- INFO -->
           <div class="watch-info">
-            <div class="wi-title">${seriesTitle || slug}</div>
+            <div class="wi-title">${seriesTitle}</div>
             <div class="wi-sub">Episode ${epNum}${epInfo.date ? ' · ' + epInfo.date : ''}</div>
             <div class="wi-acts">
-              ${back ? `<a class="wi-btn" data-go="/detail?slug=${encodeURIComponent(back)}">Detail Series</a>` : ''}
+              ${back ? `<a class="wi-btn" data-go="/detail?slug=${encodeURIComponent(back)}">← Detail Series</a>` : ''}
             </div>
           </div>
 
-          <!-- COMMENTS -->
           <div class="watch-comments">
             <h3>Komentar</h3>
             ${window.Auth?.current
@@ -549,7 +553,6 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
           </div>
         </div>
 
-        <!-- SIDEBAR: EPISODE LIST -->
         ${seriesEps.length ? `
           <div class="watch-sidebar">
             <div class="wsb-head">${seriesEps.length} Episode</div>
@@ -564,20 +567,19 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
             </div>
           </div>
         ` : ''}
-
       </div>
     `, true);
 
-    // Save to history
+    // Save history
     _saveHistory({
       slug: back || slug,
       epSlug: slug,
-      title: seriesTitle || slug,
-      thumbnail: epInfo.thumbnail || '',
+      title: seriesTitle,
+      thumbnail: '',
       ep: epNum,
     });
 
-    // Scroll to active episode
+    // Scroll active ep into view
     setTimeout(() => document.querySelector('.wsb-ep.active')?.scrollIntoView({ block: 'nearest' }), 100);
 
     // Comments
@@ -587,9 +589,8 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
       const ccInput = document.getElementById('cc-input');
       const ccChar  = document.getElementById('cc-char');
       ccInput?.addEventListener('input', () => {
-        const l = ccInput.value.length;
-        if (l > 300) ccInput.value = ccInput.value.slice(0, 300);
-        if (ccChar) ccChar.textContent = `${Math.min(l, 300)}/300`;
+        if (ccInput.value.length > 300) ccInput.value = ccInput.value.slice(0, 300);
+        if (ccChar) ccChar.textContent = `${ccInput.value.length}/300`;
       });
       document.getElementById('cc-send')?.addEventListener('click', async () => {
         const t = ccInput?.value.trim();
@@ -602,11 +603,11 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
   } catch(e) {
     App.page(`
       <div class="pg-err">
-        <h2>Debug Watch Error</h2>
+        <h2>Error</h2>
         <div style="background:#0d0d1a;border:1px solid #333;border-radius:8px;padding:1rem;margin:1rem 0;font-family:monospace;font-size:.72rem;text-align:left;word-break:break-all;max-width:500px">
-          <div style="color:#e8365d;margin-bottom:.5rem">Error: ${e.message}</div>
-          <div style="color:#888">Slug: <span style="color:#eee">${slug}</span></div>
-          <div style="color:#888;margin-top:.3rem">Back: <span style="color:#eee">${back}</span></div>
+          <div style="color:#e8365d">${e.message}</div>
+          <div style="color:#888;margin-top:.3rem">Slug: ${slug}</div>
+          <div style="color:#888;margin-top:.3rem">Back: ${back}</div>
         </div>
         <a data-go="/browse" class="btn-main" style="margin-top:1rem">Kembali</a>
       </div>
@@ -615,342 +616,3 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
 };
 
 
-// ─── SEARCH ───────────────────────────────────────────────────────────────────
-Pages.search = async function({ q='' }) {
-  App.nav();
-  App.page(`
-    <div class="search-pg">
-      <h1>Pencarian</h1>
-      <div class="search-field">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        <input id="search-input" type="text" value="${q}" placeholder="Cari judul donghua..." autocomplete="off"/>
-      </div>
-      <div id="search-result">${q?UI.skel(8):'<p class="empty">Ketik untuk mencari.</p>'}</div>
-    </div>
-  `);
-
-  const input=document.getElementById('search-input');
-  input?.focus();
-  if(q) doSearch(q);
-
-  let debounce;
-  input?.addEventListener('input',()=>{
-    clearTimeout(debounce);
-    const v=input.value.trim();
-    if(!v){document.getElementById('search-result').innerHTML='<p class="empty">Ketik untuk mencari.</p>';return;}
-    document.getElementById('search-result').innerHTML=UI.skel(8);
-    debounce=setTimeout(()=>doSearch(v),450);
-  });
-};
-
-async function doSearch(q) {
-  const el=document.getElementById('search-result');
-  if(!el) return;
-  try {
-    const res  = await fetch(`${API_BASE}/search/${encodeURIComponent(q)}`);
-    const data = await res.json();
-    // API returns { result: { data: [...] } } or { result: [...] }
-    // Search returns { results: [...], query: "...", total: N }
-    let items = [];
-    if (Array.isArray(data.results)) {
-      items = data.results;
-    } else if (Array.isArray(data.result)) {
-      items = data.result;
-    } else if (Array.isArray(data.result?.data)) {
-      items = data.result.data;
-    }
-    const cards = items.map(item=>({ 
-      slug: item.slug, title: item.title || item.headline, 
-      thumbnail: item.thumbnail, eps: item.eps, 
-      type: item.type || 'Donghua',
-      status: item.status,
-    }));
-    el.innerHTML = cards.length
-      ? `<p class="s-count">${cards.length} hasil untuk "<b>${q}</b>"</p><div class="cards-grid">${cards.map(UI.card).join('')}</div>`
-      : `<p class="empty">Tidak ada hasil untuk "<b>${q}</b>"</p>`;
-  } catch(e) {
-    console.error(e);
-    el.innerHTML=`<p class="empty">Pencarian gagal. Coba lagi.</p>`;
-  }
-}
-
-// ─── AUTH ─────────────────────────────────────────────────────────────────────
-Pages.auth = async function({ m='login' }) {
-  if (window._user) { Router.go('/home'); return; }
-  App.nav();
-
-  const renderForm = (mode) => `
-    <div class="auth-pg">
-      <div class="auth-card">
-        <a class="auth-logo" data-go="/">KICEN<span>XENSAI</span></a>
-        <div class="auth-tabs">
-          <button class="auth-tab${mode==='login'?' on':''}" data-m="login">Masuk</button>
-          <button class="auth-tab${mode==='register'?' on':''}" data-m="register">Daftar</button>
-        </div>
-        <button class="btn-google" id="g-btn">
-          <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
-          ${mode==='login'?'Masuk':'Daftar'} dengan Google
-        </button>
-        <div class="auth-or"><span>atau</span></div>
-        ${mode==='register'?`<div class="auth-field"><label>Nama</label><input id="af-name" type="text" placeholder="Nama kamu" autocomplete="name"/></div>`:''}
-        <div class="auth-field"><label>Email</label><input id="af-email" type="email" placeholder="email@kamu.com" autocomplete="email"/></div>
-        <div class="auth-field"><label>Password</label><input id="af-pass" type="password" placeholder="${mode==='register'?'Min. 6 karakter':'Password'}" autocomplete="${mode==='register'?'new-password':'current-password'}"/></div>
-        <div class="auth-err" id="af-err"></div>
-        <button class="btn-auth" id="af-submit">${mode==='login'?'Masuk':'Buat Akun'}</button>
-        <p class="auth-foot">${mode==='login'?'Belum punya akun?':'Sudah punya akun?'} <a data-go="/auth?m=${mode==='login'?'register':'login'}">${mode==='login'?'Daftar':'Masuk'}</a></p>
-      </div>
-    </div>
-  `;
-
-  App.page(renderForm(m), true);
-  bindAuth(m);
-
-  // Tab switching
-  document.querySelectorAll('.auth-tab').forEach(tab=>{
-    tab.addEventListener('click',()=>{
-      const mode=tab.dataset.m;
-      App.page(renderForm(mode), true);
-      bindAuth(mode);
-    });
-  });
-};
-
-function bindAuth(mode) {
-  const setErr = msg=>{ const e=document.getElementById('af-err'); if(e) e.textContent=msg; };
-  const setLoad= v  =>{ const b=document.getElementById('af-submit'); if(b){b.disabled=v;b.style.opacity=v?'.55':'1';b.textContent=v?'Memuat...':(mode==='login'?'Masuk':'Buat Akun');} };
-
-  function waitForAuth() {
-    return new Promise(resolve=>{
-      if(window._user){ resolve(); return; }
-      window._onNextAuth=()=>resolve();
-      setTimeout(resolve, 5000);
-    });
-  }
-
-  document.getElementById('g-btn')?.addEventListener('click',async()=>{
-    setErr('');
-    try { await window.Auth.google(); await waitForAuth(); Router.go(sessionStorage.getItem('_ar')||'/home'); sessionStorage.removeItem('_ar'); }
-    catch(e){ setErr(_authErr(e.code)); }
-  });
-
-  document.getElementById('af-submit')?.addEventListener('click',async()=>{
-    setErr('');
-    const email=document.getElementById('af-email')?.value.trim();
-    const pass =document.getElementById('af-pass')?.value;
-    if(mode==='register'){
-      const name=document.getElementById('af-name')?.value.trim();
-      if(!name) return setErr('Nama tidak boleh kosong.');
-      if(!email) return setErr('Email tidak boleh kosong.');
-      if(!pass||pass.length<6) return setErr('Password minimal 6 karakter.');
-      try{ setLoad(true); await window.Auth.register(email,pass,name); await waitForAuth(); Router.go('/home'); }
-      catch(e){ setErr(_authErr(e.code)); } finally{ setLoad(false); }
-    } else {
-      if(!email) return setErr('Email tidak boleh kosong.');
-      if(!pass) return setErr('Password tidak boleh kosong.');
-      try{ setLoad(true); await window.Auth.login(email,pass); await waitForAuth(); Router.go(sessionStorage.getItem('_ar')||'/home'); sessionStorage.removeItem('_ar'); }
-      catch(e){ setErr(_authErr(e.code)); } finally{ setLoad(false); }
-    }
-  });
-
-  document.getElementById('af-pass')?.addEventListener('keydown',e=>{ if(e.key==='Enter') document.getElementById('af-submit')?.click(); });
-}
-
-function _authErr(code){
-  return({'auth/user-not-found':'Email tidak terdaftar.','auth/wrong-password':'Password salah.','auth/invalid-credential':'Email atau password salah.','auth/email-already-in-use':'Email sudah dipakai.','auth/invalid-email':'Format email tidak valid.','auth/too-many-requests':'Terlalu banyak percobaan.','auth/popup-closed-by-user':'Login dibatalkan.','auth/popup-blocked':'Popup diblokir browser.','auth/network-request-failed':'Tidak ada koneksi.'}[code]||`Terjadi kesalahan. Coba lagi.`);
-}
-
-// ─── PREMIUM ──────────────────────────────────────────────────────────────────
-Pages.premium = async function() {
-  App.nav();
-  App.page(`
-    <div class="prem-pg">
-      <div class="prem-hero"><h1>Pilih Paket</h1><p>Nikmati konten tanpa batas.</p></div>
-      <div class="prem-plans">
-        ${PLANS.map(plan=>`
-          <div class="prem-card${plan.hot?' hot':''}">
-            ${plan.hot?`<div class="prem-pop">Terpopuler</div>`:''}
-            <div class="prem-name" style="color:${plan.color}">${plan.name}</div>
-            <div class="prem-price">${plan.price===0?`<span class="pp-free">Gratis</span>`:`<span class="pp-amt">Rp ${plan.price.toLocaleString('id-ID')}</span><span class="pp-per">/bln</span>`}</div>
-            <ul class="prem-list">${plan.perks.map(p=>`<li><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="${plan.color}" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>${p}</li>`).join('')}</ul>
-            <button class="prem-btn${plan.id==='free'?' free':''}" style="--c:${plan.color}" data-plan="${plan.id}">${plan.id==='free'?'Pakai Gratis':`Pilih ${plan.name}`}</button>
-          </div>
-        `).join('')}
-      </div>
-      <div class="pay-modal" id="pay-modal">
-        <div class="pay-box">
-          <button class="pay-close" id="pay-close"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
-          <div id="pay-content"></div>
-        </div>
-      </div>
-    </div>
-  `);
-
-  document.querySelectorAll('.prem-btn').forEach(btn=>{
-    btn.addEventListener('click',()=>{
-      const plan=PLANS.find(p=>p.id===btn.dataset.plan);
-      if(!plan||plan.id==='free'){App.toast('Kamu pakai paket Gratis.');return;}
-      const modal=document.getElementById('pay-modal');
-      const content=document.getElementById('pay-content');
-      content.innerHTML=`
-        <h2>Paket <span style="color:${plan.color}">${plan.name}</span></h2>
-        <div class="pay-price">Rp ${plan.price.toLocaleString('id-ID')} / bulan</div>
-        <div class="pay-methods-label">Pilih Metode</div>
-        <div class="pay-methods">${PAY_METHODS.map(m=>`<button class="pay-method" data-m="${m.id}">${m.label}</button>`).join('')}</div>
-        <div id="pay-action"></div>`;
-      modal.classList.add('open');
-      document.querySelectorAll('.pay-method').forEach(mb=>{
-        mb.addEventListener('click',()=>{
-          document.querySelectorAll('.pay-method').forEach(b=>b.classList.remove('on')); mb.classList.add('on');
-          document.getElementById('pay-action').innerHTML=`<button class="pay-go" style="background:${plan.color}">Bayar via ${mb.textContent}</button><p class="pay-disc">Demo — tidak ada transaksi nyata.</p>`;
-          document.querySelector('.pay-go')?.addEventListener('click',()=>{
-            document.getElementById('pay-action').innerHTML=`<div class="pay-ok"><svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="${plan.color}" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="20 6 9 17 4 12"/></svg><h3>Berhasil!</h3><p>Paket ${plan.name} aktif.</p></div>`;
-          });
-        });
-      });
-    });
-  });
-  document.getElementById('pay-close')?.addEventListener('click',()=>document.getElementById('pay-modal')?.classList.remove('open'));
-};
-
-// ─── PROFILE ──────────────────────────────────────────────────────────────────
-Pages.profile = async function() {
-  if(!window._user){sessionStorage.setItem('_ar','/profile');Router.go('/auth');return;}
-  App.nav();
-  const u=window._user;
-  App.page(`
-    <div class="prof-pg">
-      <div class="prof-header">
-        ${u.photo||u.photoURL?`<img class="prof-ava" src="${u.photo||u.photoURL}" alt="av"/>`:`<div class="prof-ava ph">${(u.name||u.displayName||'K').charAt(0).toUpperCase()}</div>`}
-        <div class="prof-info">
-          <h1>${u.name||u.displayName||'User'}</h1>
-          <p>${u.email}</p>
-          <div class="prof-badges">
-            <span class="badge-role ${u.role||'user'}">${u.role||'user'}</span>
-            ${u.banned?`<span class="badge-banned">Banned</span>`:''}
-          </div>
-        </div>
-        <div class="prof-acts">
-          ${window.Auth.isAdmin()?`<a class="btn-sm" data-go="/admin">Admin</a>`:''}
-          <button class="btn-sm-out" id="logout-btn">Keluar</button>
-        </div>
-      </div>
-      <div class="prof-tabs">
-        <button class="prof-tab on" data-tab="wl">Watchlist</button>
-        <button class="prof-tab" data-tab="hist">Riwayat</button>
-      </div>
-      <div id="prof-content"><div class="center-spinner"><div class="spinner"></div></div></div>
-    </div>
-  `);
-
-  document.getElementById('logout-btn')?.addEventListener('click',async()=>{await window.Auth.logout();Router.go('/');});
-  document.querySelectorAll('.prof-tab').forEach(tab=>{
-    tab.addEventListener('click',()=>{
-      document.querySelectorAll('.prof-tab').forEach(t=>t.classList.remove('on')); tab.classList.add('on');
-      tab.dataset.tab==='wl' ? loadWL() : loadHist();
-    });
-  });
-  loadWL();
-};
-
-async function loadWL() {
-  const el=document.getElementById('prof-content');
-  try {
-    const list=await window.DB.getWatchlist();
-    el.innerHTML=list.length?`<div class="cards-grid">${list.map(UI.card).join('')}</div>`:`<p class="empty" style="padding:2rem 0">Watchlist kosong.</p>`;
-  } catch { el.innerHTML=`<p class="empty">Gagal memuat.</p>`; }
-}
-function loadHist() {
-  const el=document.getElementById('prof-content');
-  const h=JSON.parse(localStorage.getItem('kx_hist')||'[]');
-  el.innerHTML=h.length?`<div class="cards-grid">${h.map(UI.card).join('')}</div>`:`<p class="empty" style="padding:2rem 0">Riwayat kosong.</p>`;
-}
-
-// ─── ADMIN ────────────────────────────────────────────────────────────────────
-Pages.admin = async function({ tab='dash' }) {
-  if(!window.Auth?.current){sessionStorage.setItem('_ar','/admin');Router.go('/auth');return;}
-  if(!window.Auth.isAdmin()){App.page(`<div class="pg-err"><h2>Akses ditolak.</h2><a data-go="/home" class="btn-main">Kembali</a></div>`);return;}
-  App.nav();
-  App.page(`
-    <div class="admin-layout">
-      <div class="admin-rail">
-        <div class="admin-rail-title">Admin</div>
-        <a class="admin-nav${tab==='dash'?' on':''}" data-go="/admin?tab=dash">Dashboard</a>
-        <a class="admin-nav${tab==='users'?' on':''}" data-go="/admin?tab=users">Users</a>
-        <a class="admin-nav${tab==='comments'?' on':''}" data-go="/admin?tab=comments">Komentar</a>
-        <a class="admin-back" data-go="/home">← Kembali</a>
-      </div>
-      <div class="admin-main" id="admin-main"><div class="center-spinner"><div class="spinner"></div></div></div>
-    </div>
-  `, true);
-
-  const main=document.getElementById('admin-main');
-  if(tab==='dash'){
-    try{
-      const s=await window.DB.stats();
-      main.innerHTML=`<h1>Dashboard</h1><div class="admin-stats"><div class="as-card"><div class="as-num">${s.users}</div><div class="as-lbl">Total User</div></div><div class="as-card"><div class="as-num">${s.comments}</div><div class="as-lbl">Total Komentar</div></div></div><div class="admin-quick"><h2>Aksi Cepat</h2><a class="btn-sm" data-go="/admin?tab=users">Kelola User</a><a class="btn-sm" data-go="/admin?tab=comments">Moderasi</a></div>`;
-    }catch{main.innerHTML=`<p class="empty">Gagal memuat.</p>`;}
-  } else if(tab==='users'){
-    try{
-      const users=await window.DB.getUsers();
-      main.innerHTML=`<h1>Users <span class="admin-badge">${users.length}</span></h1><div class="admin-table-wrap"><table class="admin-table"><thead><tr><th>User</th><th>Role</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${users.map(u=>`<tr class="${u.banned?'row-ban':''}"><td><div class="ut-cell">${u.photo?`<img class="mini-av" src="${u.photo}"/>`:`<div class="mini-av ph">${(u.name||'?').charAt(0)}</div>`}<div><div class="ut-name">${u.name||'-'}</div><div class="ut-email">${u.email||'-'}</div></div></div></td><td><span class="badge-role ${u.role||'user'}">${u.role||'user'}</span></td><td><span class="badge-${u.banned?'banned':'active'}">${u.banned?'Banned':'Aktif'}</span></td><td><div class="tbl-acts"><button class="tbl-btn ${u.banned?'unban':'ban'}" data-uid="${u.id}" data-banned="${u.banned||false}">${u.banned?'Unban':'Ban'}</button>${u.role!=='admin'?`<button class="tbl-btn promote" data-uid="${u.id}">Jadikan Admin</button>`:''}<button class="tbl-btn del-c" data-uid="${u.id}">Hapus Komen</button></div></td></tr>`).join('')}</tbody></table></div>`;
-      main.querySelectorAll('.tbl-btn.ban,.tbl-btn.unban').forEach(b=>b.addEventListener('click',async()=>{const ban=b.dataset.banned!=='true';if(!confirm(`${ban?'Ban':'Unban'}?`))return;await window.DB.banUser(b.dataset.uid,ban);Router.go('/admin?tab=users');}));
-      main.querySelectorAll('.tbl-btn.promote').forEach(b=>b.addEventListener('click',async()=>{if(!confirm('Jadikan admin?'))return;await window.DB.setRole(b.dataset.uid,'admin');Router.go('/admin?tab=users');}));
-      main.querySelectorAll('.tbl-btn.del-c').forEach(b=>b.addEventListener('click',async()=>{if(!confirm('Hapus semua komentar?'))return;await window.DB.nukeComments(b.dataset.uid);App.toast('Komentar dihapus.');}));
-    }catch(e){main.innerHTML=`<p class="empty">Gagal: ${e.message}</p>`;}
-  } else if(tab==='comments'){
-    try{
-      const comments=await window.DB.recentComments();
-      main.innerHTML=`<h1>Komentar <span class="admin-badge">${comments.length}</span></h1><div class="admin-comments">${!comments.length?'<p class="empty">Belum ada komentar.</p>':comments.map(c=>`<div class="ac-card" id="acc-${c.id}"><div class="ac-head"><b>${c.name}</b><span class="ac-time">${_fmtAdminTime(c.createdAt)}</span><span class="ac-cid">${c.contentId}</span></div><p class="ac-text">${c.text}</p><button class="tbl-btn ban" data-id="${c.id}">Hapus</button></div>`).join('')}</div>`;
-      main.querySelectorAll('.ac-card .tbl-btn').forEach(b=>b.addEventListener('click',async()=>{if(!confirm('Hapus?'))return;await window.DB.deleteComment(b.dataset.id);document.getElementById(`acc-${b.dataset.id}`)?.remove();}));
-    }catch(e){main.innerHTML=`<p class="empty">Gagal: ${e.message}</p>`;}
-  }
-};
-
-// ─── SUPPORT ─────────────────────────────────────────────────────────────────
-Pages.support = async function() {
-  App.nav();
-  App.page(`
-    <div class="support-pg">
-      <div class="support-hero">
-        <div class="supp-logo-wrap">
-          <div id="supp-logo-click" class="supp-logo-btn">
-            <svg viewBox="0 0 60 60" fill="none" width="60" height="60"><rect width="60" height="60" rx="14" fill="#E8365D"/><path d="M18 20v20l10-5 4 8 6-3-4-8 10-5L18 20z" fill="white"/></svg>
-          </div>
-        </div>
-        <h1>Bantuan</h1>
-        <p>Temukan jawaban atau hubungi kami.</p>
-      </div>
-
-      <div id="supp-contact" style="display:none" class="supp-contact-wrap">
-        <div class="supp-contact-card">
-          <h3>Hubungi Tim</h3>
-          <div class="supp-contacts">
-            <a class="sci" href="https://instagram.com/kiki_fzl1" target="_blank"><div class="sci-ico ig"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg></div><div><span class="sci-lbl">Instagram</span><span class="sci-val">@kiki_fzl1</span></div></a>
-            <a class="sci" href="https://t.me/kyshiro1" target="_blank"><div class="sci-ico tg"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg></div><div><span class="sci-lbl">Telegram</span><span class="sci-val">@kyshiro1</span></div></a>
-            <a class="sci" href="mailto:kikimodesad8@gmail.com"><div class="sci-ico em"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div><div><span class="sci-lbl">Email</span><span class="sci-val">kikimodesad8@gmail.com</span></div></a>
-          </div>
-        </div>
-      </div>
-
-      <div class="support-cards">
-        ${[['Video tidak bisa diputar','Coba ganti server. Ada beberapa pilihan server di bawah player.'],['Masalah login','Pastikan email dan password benar. Izinkan popup untuk Google login.'],['Masalah pembayaran','Hubungi kami dengan bukti transaksi. Diproses dalam 1x24 jam.'],['Laporkan bug','Klik logo di atas untuk menghubungi tim kami langsung.']].map(([t,d])=>`<div class="support-card"><h3>${t}</h3><p>${d}</p></div>`).join('')}
-      </div>
-
-      <div class="faq-title">FAQ</div>
-      ${[['Bagaimana cara upgrade Premium?','Klik tombol Premium di navbar, pilih paket, lalu pilih metode pembayaran.'],['Kenapa video error?','Coba ganti server. Setiap konten punya beberapa pilihan server.'],['Apakah ada aplikasi Android?','Belum ada app resmi. Gunakan browser mobile untuk pengalaman terbaik.']].map(([q,a])=>`<div class="faq-item"><button class="faq-q"><span>${q}</span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button><div class="faq-a">${a}</div></div>`).join('')}
-    </div>
-  `);
-
-  document.getElementById('supp-logo-click')?.addEventListener('click',()=>{
-    const el=document.getElementById('supp-contact');
-    if(el){ el.style.display=el.style.display==='none'?'block':'none'; if(el.style.display==='block') el.scrollIntoView({behavior:'smooth',block:'center'}); }
-  });
-  document.querySelectorAll('.faq-q').forEach(btn=>{
-    btn.addEventListener('click',()=>{ const item=btn.closest('.faq-item'); const was=item.classList.contains('open'); document.querySelectorAll('.faq-item').forEach(i=>i.classList.remove('open')); if(!was)item.classList.add('open'); });
-  });
-};
-
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-function _fmtTime(ts){if(!ts)return'';try{const d=ts.toDate?ts.toDate():new Date(ts);const diff=(Date.now()-d)/1000;if(diff<60)return'Baru saja';if(diff<3600)return`${Math.floor(diff/60)} menit lalu`;if(diff<86400)return`${Math.floor(diff/3600)} jam lalu`;return`${Math.floor(diff/86400)} hari lalu`;}catch{return'';}}
-function _fmtAdminTime(ts){try{const d=ts?.toDate?ts.toDate():new Date(ts);return d.toLocaleDateString('id-ID',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}catch{return'';}}
-function _esc(t=''){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
