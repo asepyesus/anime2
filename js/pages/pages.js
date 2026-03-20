@@ -288,9 +288,12 @@ Pages.detail = async function({ slug }) {
               <p class="detail-overview">${info.synopsis||info.description||'Tidak ada sinopsis.'}</p>
               <div class="detail-btns">
                 ${info.episodes?.length
-                  ? `<a class="btn-watch-now" data-go="/watch?slug=${encodeURIComponent(info.episodes[0].slug)}&back=${encodeURIComponent(slug)}">
+                  ? `<a class="btn-watch-now" data-go="/watch?slug=${encodeURIComponent(info.episodes[info.episodes.length-1].slug)}&back=${encodeURIComponent(seriesSlug)}">
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-                      Tonton Episode 1
+                      Tonton Episode Terbaru
+                    </a>
+                    <a class="btn-ghost" style="font-size:.82rem;padding:.55rem 1rem" data-go="/watch?slug=${encodeURIComponent(info.episodes[0].slug)}&back=${encodeURIComponent(seriesSlug)}">
+                      Ep 1
                     </a>`
                   : ''
                 }
@@ -308,7 +311,7 @@ Pages.detail = async function({ slug }) {
             <h2>Daftar Episode <span class="ep-count">${info.episodes.length} Episode</span></h2>
             <div class="ep-grid" id="ep-grid">
               ${info.episodes.map((ep,i)=>`
-                <a class="ep-card" data-go="/watch?slug=${encodeURIComponent(ep.slug)}&back=${encodeURIComponent(slug)}">
+                <a class="ep-card" data-go="/watch?slug=${encodeURIComponent(ep.slug)}&back=${encodeURIComponent(seriesSlug)}">
                   <div class="ep-num">Ep ${ep.episode_number||i+1}</div>
                   <div class="ep-title">${ep.title||`Episode ${ep.episode_number||i+1}`}</div>
                 </a>
@@ -323,7 +326,7 @@ Pages.detail = async function({ slug }) {
     document.getElementById('wl-btn')?.addEventListener('click', async () => {
       if (!window.Auth?.current) { Router.go('/auth'); return; }
       try {
-        const added = await window.DB.watchlistToggle({ slug, title:info.title, thumbnail:info.thumbnail, type:'donghua' });
+        const added = await window.DB.watchlistToggle({ slug:seriesSlug, title:info.title, thumbnail:info.thumbnail, type:'donghua' });
         const btn = document.getElementById('wl-btn');
         btn.className = 'btn-wl' + (added?' saved':'');
         btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="${added?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg> ${added?'Tersimpan':'Watchlist'}`;
@@ -344,18 +347,32 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
 
   try {
     // Get video sources for this episode
-    const res  = await fetch(`${API_BASE}/video-source/${encodeURIComponent(slug)}`);
-    const data = await res.json();
-    const sources = data.result?.sources || data.result?.servers || [];
+    const [vsRes, epRes] = await Promise.all([
+      fetch(`${API_BASE}/video-source/${encodeURIComponent(slug)}`),
+      fetch(`${API_BASE}/episode/${encodeURIComponent(slug)}`),
+    ]);
+    
+    const vsData  = await vsRes.json();
+    const epData  = await epRes.json();
+    
+    // Normalize sources - API returns various formats
+    const rawResult = vsData.result || {};
+    let sources = [];
+    if (Array.isArray(rawResult)) {
+      sources = rawResult;
+    } else if (Array.isArray(rawResult.sources)) {
+      sources = rawResult.sources;
+    } else if (Array.isArray(rawResult.servers)) {
+      sources = rawResult.servers;
+    } else if (rawResult.url || rawResult.src) {
+      sources = [rawResult];
+    }
 
-    // Get episode info
-    const epRes  = await fetch(`${API_BASE}/episode/${encodeURIComponent(slug)}`);
-    const epData = await epRes.json();
     const epInfo = epData.result || {};
 
     // Get series info for episode list
     let seriesEps = [];
-    let seriesTitle = epInfo.anime_title || epInfo.title || '';
+    let seriesTitle = epInfo.anime_title || epInfo.series_title || epInfo.title || '';
     if (back) {
       try {
         const sRes  = await fetch(`${API_BASE}/${encodeURIComponent(back)}`);
@@ -374,7 +391,8 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
     const nextEp  = curIdx < seriesEps.length-1 ? seriesEps[curIdx+1] : null;
 
     // Primary source (first available)
-    const primary = sources[0];
+    // Normalize primary source - check all possible URL fields
+    const primary = sources[0] || null;
 
     App.page(`
       <div class="watch-pg">
@@ -382,11 +400,18 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
 
           <!-- PLAYER -->
           <div class="watch-player" id="watch-player">
-            ${primary?.src || primary?.url
-              ? `<iframe id="watch-iframe" src="${primary.src||primary.url}" frameborder="0" allow="autoplay;fullscreen;picture-in-picture;encrypted-media" allowfullscreen referrerpolicy="no-referrer"></iframe>`
+            ${primary?.src || primary?.url || primary?.link || primary?.stream_url
+              ? `<iframe id="watch-iframe" 
+                  src="${primary.src||primary.url||primary.link||primary.stream_url}" 
+                  frameborder="0" 
+                  allow="autoplay;fullscreen;picture-in-picture;encrypted-media" 
+                  allowfullscreen 
+                  referrerpolicy="no-referrer"
+                ></iframe>`
               : `<div class="no-video">
                   <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="4"/><path d="m10 8 6 4-6 4V8z"/></svg>
-                  <p>Video tidak tersedia</p>
+                  <p>Video tidak tersedia untuk episode ini</p>
+                  <span style="font-size:.75rem;color:var(--t3);margin-top:.25rem">${sources.length} sumber ditemukan</span>
                 </div>`
             }
           </div>
@@ -395,11 +420,11 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
           ${sources.length > 1 ? `
             <div class="server-bar">
               <span class="server-label">Server:</span>
-              ${sources.map((src,i)=>`
-                <button class="srv-btn${i===0?' on':''}" data-src="${src.src||src.url||''}" data-idx="${i}">
-                  ${src.server||src.name||`Server ${i+1}`}
-                </button>
-              `).join('')}
+              ${sources.map((src,i)=>{
+                const url = src.src||src.url||src.link||src.stream_url||'';
+                const label = src.server||src.name||src.quality||`Server ${i+1}`;
+                return `<button class="srv-btn${i===0?' on':''}" data-src="${url}" data-idx="${i}">${label}</button>`;
+              }).join('')}
             </div>
           ` : ''}
 
