@@ -12,7 +12,6 @@
 </head>
 <body>
 
-  <!-- SPLASH -->
   <div id="splash">
     <div class="splash-logo">
       <div class="splash-icon">
@@ -27,7 +26,6 @@
     <div class="splash-sub">Anime · Donghua · Drakor · Dracin</div>
   </div>
 
-  <!-- APP -->
   <div id="root" style="display:none">
     <div id="app-nav"></div>
     <div id="page"></div>
@@ -44,82 +42,82 @@
   <script type="module">
     import { Auth, DB } from './js/firebase.js';
 
-    window.Auth = Auth;
-    window.DB = DB;
-    window._user = undefined; // undefined = not yet resolved, null = logged out, object = logged in
+    // Expose globally - _user starts as undefined (= auth not yet resolved)
+    window.Auth   = Auth;
+    window.DB     = DB;
+    window._user  = undefined;
 
-    // FIX: Load scripts sequentially, register routes AFTER all scripts loaded
-    // This prevents Pages.xxx = undefined race condition
     const pageScripts = [
       'js/app.js',
       'js/pages/landing.js',
       'js/pages/home.js',
-      'js/pages/browse.js',  // contains: Pages.browse, Pages.detail, Pages.watch, Pages.search
-      'js/pages/auth.js',    // contains: Pages.auth, Pages.premium, Pages.profile, Pages.admin, Pages.support
+      'js/pages/browse.js',   // browse + detail + watch + search
+      'js/pages/auth.js',     // auth + premium + profile + admin + support
     ];
 
     function loadScript(src) {
-      return new Promise((resolve) => {
+      return new Promise(resolve => {
         const s = document.createElement('script');
         s.src = src;
         s.onload = resolve;
-        s.onerror = () => { console.warn('Failed to load:', src); resolve(); };
+        s.onerror = () => { console.warn('Could not load:', src); resolve(); };
         document.body.appendChild(s);
       });
     }
 
-    window.addEventListener('DOMContentLoaded', async () => {
+    async function boot() {
       window.Pages = {};
 
-      // Load all page scripts sequentially
-      for (const src of pageScripts) {
-        await loadScript(src);
-      }
+      // 1. Load all page scripts first
+      for (const src of pageScripts) await loadScript(src);
 
-      // FIX: Init auth and wait for first auth state before starting router
-      await new Promise(resolve => {
-        Auth.init((user) => {
-          window._user = user;
-          // Update nav on auth state changes
-          const nav = document.getElementById('app-nav');
-          if (nav && nav.innerHTML.trim()) {
-            UI.renderNav();
-          }
-          resolve(); // only resolve first time to unblock router start
-        });
-        // Safety timeout in case Firebase is slow
-        setTimeout(resolve, 3000);
-      });
-
-      // FIX: Register routes AFTER all Pages.xxx are defined
-      Router.on('/', Pages.landing);
-      Router.on('/home', Pages.home);
-      Router.on('/browse', Pages.browse);
-      Router.on('/detail', Pages.detail);
-      Router.on('/watch', Pages.watch);
-      Router.on('/search', Pages.search);
-      Router.on('/auth', Pages.auth);
+      // 2. Register all routes (Pages.xxx now defined)
+      Router.on('/',        Pages.landing);
+      Router.on('/home',    Pages.home);
+      Router.on('/browse',  Pages.browse);
+      Router.on('/detail',  Pages.detail);
+      Router.on('/watch',   Pages.watch);
+      Router.on('/search',  Pages.search);
+      Router.on('/auth',    Pages.auth);
       Router.on('/premium', Pages.premium);
       Router.on('/profile', Pages.profile);
-      Router.on('/admin', Pages.admin);
+      Router.on('/admin',   Pages.admin);
       Router.on('/support', Pages.support);
       Router.on('/404', async () => {
         UI.setPage(`<div class="pg-err"><h2>Halaman tidak ditemukan</h2><a data-go="/">Kembali</a></div>`);
       });
 
-      // Hide splash and start router
-      setTimeout(() => {
-        const splash = document.getElementById('splash');
-        if (splash) {
-          splash.classList.add('out');
-          setTimeout(() => {
-            splash.remove();
-            document.getElementById('root').style.display = '';
-            Router.start();
-          }, 600);
-        }
-      }, 2200);
-    });
+      // 3. Init Firebase auth — waits for first auth state resolution
+      await new Promise(resolve => {
+        let resolved = false;
+        Auth.init(user => {
+          // Update navbar on every auth change
+          const nav = document.getElementById('app-nav');
+          if (nav && nav.innerHTML.trim()) UI.renderNav();
+
+          // Only start router on first resolution
+          if (!resolved) {
+            resolved = true;
+            resolve();
+          }
+        });
+        // Safety: start anyway after 3s if Firebase is unreachable
+        setTimeout(() => { if (!resolved) { resolved = true; resolve(); } }, 3000);
+      });
+
+      // 4. Show app, hide splash, start router
+      const splash = document.getElementById('splash');
+      if (splash) {
+        splash.classList.add('out');
+        setTimeout(() => {
+          splash.remove();
+          document.getElementById('root').style.display = '';
+          Router.start();
+        }, 600);
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', boot);
   </script>
 </body>
 </html>

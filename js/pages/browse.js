@@ -152,34 +152,160 @@ function updateWLBtn(btn, inWL) {
 }
 
 
-// Build multiple video embed sources for maximum availability
-function buildVideoSources(id, cat, type, ep) {
+// ─── VIDEO SOURCES ──────────────────────────────────────────────────────────
+// Uses Consumet API (open source) + HLS.js for real streaming
+// Falls back to embed sources if Consumet unavailable
+
+const CONSUMET = 'https://api.consumet.org';
+
+async function getAnimeStreamUrl(malId, ep) {
+  try {
+    // Search anime on Gogoanime via Consumet
+    const searchRes = await fetch(`${CONSUMET}/anime/gogoanime/info/${malId}?id=${malId}`);
+    if (!searchRes.ok) throw new Error('search failed');
+    const info = await searchRes.json();
+    const epData = info.episodes?.find(e => e.number == ep) || info.episodes?.[ep-1];
+    if (!epData) throw new Error('episode not found');
+
+    const streamRes = await fetch(`${CONSUMET}/anime/gogoanime/watch/${epData.id}`);
+    if (!streamRes.ok) throw new Error('stream failed');
+    const stream = await streamRes.json();
+
+    // Prefer 1080p, then 720p, then first available
+    const sources = stream.sources || [];
+    const hd = sources.find(s => s.quality === '1080p')
+            || sources.find(s => s.quality === '720p')
+            || sources[0];
+    return hd?.url || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getDramaStreamUrl(tmdbId, type, ep) {
+  try {
+    const mediaType = type === 'movie' ? 'movies' : 'tv';
+    const streamRes = await fetch(`${CONSUMET}/movies/dramacool/watch?episodeId=${tmdbId}&mediaId=${tmdbId}`);
+    if (!streamRes.ok) throw new Error('drama stream failed');
+    const stream = await streamRes.json();
+    const sources = stream.sources || [];
+    const hd = sources.find(s => s.quality === '1080p')
+            || sources.find(s => s.quality === '720p')
+            || sources[0];
+    return hd?.url || null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── ANICHIN (DONGHUA) ───────────────────────────────────────────────────────
+// Loads @zhadev/anichin browser SDK from CDN, then fetches embed URL per episode
+
+async function loadAnichinSDK() {
+  if (window.AnichinScraper) return window.AnichinScraper;
+  return new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@zhadev/anichin/dist/javascript/browser.min.js';
+    s.onload = () => resolve(window.AnichinScraper);
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+// Convert TMDB title to Anichin slug format for searching
+function titleToSlug(title) {
+  return title.toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
+}
+
+async function getDonghuaEmbedUrl(title, epNum) {
+  try {
+    const AnichinScraper = await loadAnichinSDK();
+    const scraper = new AnichinScraper({ baseUrl: 'https://anichin.moe' });
+
+    // Search by title
+    const searchResult = await scraper.search(title, 1);
+    if (!searchResult.success || !searchResult.data?.search?.lists?.length) {
+      throw new Error('not found');
+    }
+
+    // Pick best match from search results
+    const lists = searchResult.data.search.lists;
+    const titleLower = title.toLowerCase();
+    const match = lists.find(item =>
+      item.title?.toLowerCase().includes(titleLower.split(' ')[0]) ||
+      titleLower.includes(item.title?.toLowerCase().split(' ')[0] || '')
+    ) || lists[0];
+
+    if (!match?.slug) throw new Error('no slug');
+
+    // Get series info to find episode slug
+    const seriesResult = await scraper.series(match.slug);
+    if (!seriesResult.success) throw new Error('series failed');
+
+    const episodes = seriesResult.data?.series?.episodes || [];
+    // Find the right episode
+    const ep = episodes.find(e =>
+      parseInt(e.episode_number) === epNum ||
+      e.title?.includes(`Episode ${epNum}`) ||
+      e.title?.includes(`Ep ${epNum}`)
+    ) || episodes[epNum - 1] || episodes[episodes.length - 1];
+
+    if (!ep?.slug) throw new Error('episode not found');
+
+    // Get watch data with embed URL
+    const watchResult = await scraper.watch(ep.slug);
+    if (!watchResult.success) throw new Error('watch failed');
+
+    const servers = watchResult.data?.watch?.servers || [];
+    const server = servers[0];
+    return server?.server_url || null;
+
+  } catch (e) {
+    console.warn('Anichin failed:', e.message);
+    return null;
+  }
+}
+
+// Embed fallbacks per category
+function buildEmbedSources(id, cat, type, ep) {
   const epNum = parseInt(ep) || 1;
-  const sources = [];
+
+  if (cat === 'donghua') {
+    // Donghua fallback embeds — Anichin is primary (handled in autoLoad)
+    return [
+      `https://vidsrc.to/embed/tv/${id}/${epNum}`,
+      `https://vidsrc.xyz/embed/tv?tmdb=${id}&season=1&episode=${epNum}`,
+      `https://2embed.skin/embedtv/${id}&s=1&e=${epNum}`,
+    ];
+  }
 
   if (cat === 'anime') {
-    // Anime sources using MAL ID
-    sources.push(`https://vidsrc.to/embed/anime/${id}/${epNum}`);
-    sources.push(`https://vidsrc.xyz/embed/anime?mal=${id}&ep=${epNum}`);
-    sources.push(`https://2embed.skin/embed/anime?mal=${id}&ep=${epNum}`);
-    sources.push(`https://multiembed.mov/directstream.php?video_id=${id}&tmdb=0&s=1&e=${epNum}`);
-  } else {
-    // Drakor / Dracin / Donghua — use TMDB ID
-    const mediaType = type === 'movie' ? 'movie' : 'tv';
-    if (mediaType === 'movie') {
-      sources.push(`https://vidsrc.to/embed/movie/${id}`);
-      sources.push(`https://vidsrc.xyz/embed/movie?tmdb=${id}`);
-      sources.push(`https://2embed.skin/embed/${id}`);
-      sources.push(`https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1`);
-    } else {
-      sources.push(`https://vidsrc.to/embed/tv/${id}/${epNum}`);
-      sources.push(`https://vidsrc.xyz/embed/tv?tmdb=${id}&season=1&episode=${epNum}`);
-      sources.push(`https://2embed.skin/embedtv/${id}&s=1&e=${epNum}`);
-      sources.push(`https://multiembed.mov/directstream.php?video_id=${id}&tmdb=1&s=1&e=${epNum}`);
-    }
+    return [
+      `https://embed.aniwave.to/e/${id}?ep=${epNum}`,
+      `https://vidsrc.to/embed/anime/${id}/${epNum}`,
+      `https://2anime.xyz/embed/${id}/${epNum}`,
+    ];
   }
-  return sources;
+
+  // Drakor / Dracin
+  const mt = type === 'movie' ? 'movie' : 'tv';
+  if (mt === 'movie') {
+    return [
+      `https://vidsrc.to/embed/movie/${id}`,
+      `https://vidsrc.xyz/embed/movie?tmdb=${id}`,
+      `https://2embed.skin/embed/${id}`,
+    ];
+  }
+  return [
+    `https://vidsrc.to/embed/tv/${id}/${epNum}`,
+    `https://vidsrc.xyz/embed/tv?tmdb=${id}&season=1&episode=${epNum}`,
+    `https://2embed.skin/embedtv/${id}&s=1&e=${epNum}`,
+  ];
 }
+
 
 Pages.watch = async function({ id, type='tv', cat='anime', ep='1' }) {
   if (!id) { Router.go('/home'); return; }
@@ -198,8 +324,7 @@ Pages.watch = async function({ id, type='tv', cat='anime', ep='1' }) {
     // Save to history
     API.saveHistory({id,type:type||'tv',category:cat,title:data.title,poster:data.poster,rating:data.rating,year:data.year}, epNum);
 
-    const videoSources = buildVideoSources(id, cat, type, epNum);
-    const primarySrc = videoSources[0];
+    const embedSources = buildEmbedSources(id, cat, type, epNum);
 
     UI.setPage(`
       <div class="watch-layout">
@@ -207,19 +332,28 @@ Pages.watch = async function({ id, type='tv', cat='anime', ep='1' }) {
         <!-- LEFT: PLAYER + INFO + COMMENTS -->
         <div class="watch-main">
           <div class="watch-player-wrap">
+            <video id="hls-player" controls playsinline style="display:none;width:100%;height:100%;position:absolute;inset:0;background:#000"></video>
             <iframe
               id="watch-iframe"
-              src="${primarySrc}"
+              src=""
               frameborder="0"
               allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
               allowfullscreen
               referrerpolicy="no-referrer"
               title="${data.title} Episode ${epNum}"
+              style="display:none"
             ></iframe>
+            <div id="player-loading" class="player-loading">
+              <div class="spinner" style="border-top-color:#fff;border-color:rgba(255,255,255,.15);border-top-color:white"></div>
+              <span>Memuat video...</span>
+            </div>
           </div>
           <div class="watch-src-bar">
             <span class="wsb-label">Server:</span>
-            ${videoSources.map((src,i) => `<button class="wsrc-btn${i===0?' on':''}" data-src="${src}" data-idx="${i}">Server ${i+1}</button>`).join('')}
+            <button class="wsrc-btn on" data-type="consumet" id="srv-auto">
+              ${cat === 'donghua' ? 'Anichin (Sub ID)' : 'Auto'}
+            </button>
+            ${embedSources.map((src,i) => `<button class="wsrc-btn" data-type="embed" data-src="${src}">Server ${i+2}</button>`).join('')}
           </div>
 
           <!-- INFO BAR -->
@@ -330,14 +464,110 @@ Pages.watch = async function({ id, type='tv', cat='anime', ep='1' }) {
       wsToggle.textContent = collapsed ? 'Selengkapnya' : 'Lebih sedikit';
     });
 
-    // Video server switcher
+    // Load HLS.js dynamically
+    async function loadHLS() {
+      if (window.Hls) return window.Hls;
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.jsdelivr.net/npm/hls.js@latest/dist/hls.min.js';
+        s.onload = () => resolve(window.Hls);
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+
+    function showIframe(src) {
+      const loading = document.getElementById('player-loading');
+      const iframe  = document.getElementById('watch-iframe');
+      const video   = document.getElementById('hls-player');
+      if (loading) loading.style.display = 'none';
+      if (video)   { video.style.display = 'none'; if (video.hlsInstance) { video.hlsInstance.destroy(); video.hlsInstance = null; } }
+      if (iframe)  { iframe.style.display = ''; iframe.src = src; }
+    }
+
+    function showHLS(url) {
+      const loading = document.getElementById('player-loading');
+      const iframe  = document.getElementById('watch-iframe');
+      const video   = document.getElementById('hls-player');
+      if (loading) loading.style.display = 'none';
+      if (iframe)  { iframe.style.display = 'none'; iframe.src = ''; }
+      if (!video)  return;
+      video.style.display = '';
+
+      if (window.Hls?.isSupported()) {
+        if (video.hlsInstance) video.hlsInstance.destroy();
+        const hls = new window.Hls({ enableWorker: true, lowLatencyMode: false });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(window.Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+        hls.on(window.Hls.Events.ERROR, (_, d) => {
+          if (d.fatal) { hls.destroy(); showIframe(embedSources[0]); UI.toast('Auto gagal, pakai Server 2'); }
+        });
+        video.hlsInstance = hls;
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Safari native HLS
+        video.src = url;
+        video.play().catch(() => {});
+      } else {
+        showIframe(embedSources[0]);
+      }
+    }
+
+    // Auto-load: use best available source per category
+    async function autoLoad() {
+      const loading = document.getElementById('player-loading');
+      if (loading) loading.style.display = '';
+
+      try {
+        if (cat === 'donghua') {
+          // Donghua: use Anichin (sub Indonesia) → embed fallback
+          const embedUrl = await getDonghuaEmbedUrl(data.title, epNum);
+          if (embedUrl) {
+            showIframe(embedUrl);
+          } else {
+            showIframe(embedSources[0]);
+          }
+          return;
+        }
+
+        if (cat === 'anime') {
+          // Anime: try Consumet/Gogoanime → embed fallback
+          await loadHLS();
+          const streamUrl = await getAnimeStreamUrl(id, epNum);
+          if (streamUrl) {
+            showHLS(streamUrl);
+          } else {
+            showIframe(embedSources[0]);
+          }
+          return;
+        }
+
+        // Drakor / Dracin: try Consumet Dramacool → embed fallback
+        await loadHLS();
+        const streamUrl = await getDramaStreamUrl(id, type, epNum);
+        if (streamUrl) {
+          showHLS(streamUrl);
+        } else {
+          showIframe(embedSources[0]);
+        }
+
+      } catch {
+        showIframe(embedSources[0]);
+      }
+    }
+
+    // Start auto load
+    autoLoad();
+
+    // Server switcher buttons
     document.querySelectorAll('.wsrc-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const iframe = document.getElementById('watch-iframe');
-        if (iframe) {
-          iframe.src = btn.dataset.src;
-          document.querySelectorAll('.wsrc-btn').forEach(b => b.classList.remove('on'));
-          btn.classList.add('on');
+        document.querySelectorAll('.wsrc-btn').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+        if (btn.dataset.type === 'consumet') {
+          autoLoad();
+        } else if (btn.dataset.src) {
+          showIframe(btn.dataset.src);
           UI.toast('Berganti ke ' + btn.textContent);
         }
       });
