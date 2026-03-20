@@ -183,25 +183,32 @@ Pages.browse = async function({ page='1', q='' }) {
   });
 
   try {
-    let cards = [], totalPages = 1;
+    let cards = [];
 
     if (q) {
+      // Search mode
       const res  = await fetch(`${API_BASE}/search/${encodeURIComponent(q)}`);
       const data = await res.json();
-      cards = data.result?.data || data.result || [];
-      // Normalize search result format
-      cards = cards.map(item => ({
-        slug:      item.slug,
-        title:     item.title,
-        thumbnail: item.thumbnail,
-        eps:       item.eps,
-        type:      item.type || 'Donghua',
-      }));
+      const raw  = data.result?.data || data.result || [];
+      cards = Array.isArray(raw) ? raw.map(item => ({
+        slug: item.slug, title: item.title,
+        thumbnail: item.thumbnail, eps: item.eps, type: item.type || 'Donghua',
+      })) : [];
     } else {
-      const res  = await fetch(`${API_BASE}/anime?page=${pg}`);
+      // All donghua - use homepage API, combine all sections
+      const res  = await fetch(`${API_BASE}/`);
       const data = await res.json();
-      cards = data.result?.data || [];
-      totalPages = data.result?.last_page || 1;
+      const sections = data.results || [];
+      // Collect all unique cards from all sections
+      const seen = new Set();
+      sections.forEach(sec => {
+        (sec.cards || []).forEach(card => {
+          if (card.slug && !seen.has(card.slug)) {
+            seen.add(card.slug);
+            cards.push(card);
+          }
+        });
+      });
     }
 
     const grid = document.getElementById('browse-grid');
@@ -209,15 +216,9 @@ Pages.browse = async function({ page='1', q='' }) {
       ? `<div class="cards-grid">${cards.map(UI.card).join('')}</div>`
       : `<p class="empty">Tidak ada hasil.</p>`;
 
-    if (!q && totalPages > 1) {
-      const pgEl = document.getElementById('browse-pg');
-      pgEl.innerHTML = renderPagination(pg, Math.min(totalPages,100));
-      pgEl.querySelectorAll('[data-page]').forEach(btn => {
-        btn.addEventListener('click', () => Router.go(`/browse?page=${btn.dataset.page}`));
-      });
-    }
   } catch(e) {
-    document.getElementById('browse-grid').innerHTML = `<p class="empty">Gagal memuat konten.</p>`;
+    console.error(e);
+    document.getElementById('browse-grid').innerHTML = `<p class="empty">Gagal memuat konten. Coba refresh.</p>`;
   }
 };
 
@@ -242,11 +243,27 @@ Pages.detail = async function({ slug }) {
   App.page(`<div class="center-spinner"><div class="spinner"></div></div>`);
 
   try {
-    const res  = await fetch(`${API_BASE}/${encodeURIComponent(slug)}`);
-    const data = await res.json();
-    const info = data.result;
+    // Try the slug directly first, if it fails try stripping episode suffix
+    let res  = await fetch(`${API_BASE}/${encodeURIComponent(slug)}`);
+    let data = await res.json();
+    let info = data.result;
 
-    if (!info) throw new Error('not found');
+    // If not found or no episodes, try extracting series slug from episode slug
+    // Episode slugs look like: "series-name-episode-XX-subtitle-indonesia"
+    if (!info || !info.title) {
+      // Strip common suffixes to get series slug
+      const seriesSlug = slug
+        .replace(/-episode-\d+.*$/i, '')
+        .replace(/-subtitle-indonesia.*$/i, '')
+        .replace(/-tamat.*$/i, '');
+      if (seriesSlug !== slug) {
+        res  = await fetch(`${API_BASE}/${encodeURIComponent(seriesSlug)}`);
+        data = await res.json();
+        info = data.result;
+      }
+    }
+
+    if (!info || !info.title) throw new Error('not found');
 
     const inWL = await window.DB?.inWatchlist(slug) || false;
 
@@ -558,12 +575,22 @@ async function doSearch(q) {
   try {
     const res  = await fetch(`${API_BASE}/search/${encodeURIComponent(q)}`);
     const data = await res.json();
-    const items = data.result?.data || data.result || [];
+    // API returns { result: { data: [...] } } or { result: [...] }
+    let items = [];
+    if (Array.isArray(data.result)) {
+      items = data.result;
+    } else if (Array.isArray(data.result?.data)) {
+      items = data.result.data;
+    } else if (Array.isArray(data.results)) {
+      // Homepage format - flatten sections
+      data.results.forEach(sec => { if(sec.cards) items.push(...sec.cards); });
+    }
     const cards = items.map(item=>({ slug:item.slug, title:item.title, thumbnail:item.thumbnail, eps:item.eps, type:item.type||'Donghua' }));
     el.innerHTML = cards.length
       ? `<p class="s-count">${cards.length} hasil untuk "<b>${q}</b>"</p><div class="cards-grid">${cards.map(UI.card).join('')}</div>`
-      : `<p class="empty">Tidak ada hasil untuk "${q}"</p>`;
-  } catch {
+      : `<p class="empty">Tidak ada hasil untuk "<b>${q}</b>"</p>`;
+  } catch(e) {
+    console.error(e);
     el.innerHTML=`<p class="empty">Pencarian gagal. Coba lagi.</p>`;
   }
 }
