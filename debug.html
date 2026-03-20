@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Debug API</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0a12; color: #eee; font-family: monospace; padding: 1rem; font-size: 13px; }
+    h2 { color: #e8365d; margin: 1rem 0 .5rem; font-size: 14px; }
+    button { background: #e8365d; color: white; border: none; padding: .4rem .9rem; border-radius: 5px; cursor: pointer; font-size: 12px; margin: .25rem; }
+    button.sec { background: #333; }
+    input { background: #1a1a2e; border: 1px solid #333; color: #eee; padding: .4rem .7rem; border-radius: 5px; width: 100%; margin-bottom: .4rem; font-size: 12px; }
+    pre { background: #0d0d1a; border: 1px solid #2a2a3e; padding: .75rem; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; font-size: 11px; line-height: 1.5; }
+    .ok { color: #00d4a8; }
+    .err { color: #e8365d; }
+    .section { margin-bottom: 1.5rem; border: 1px solid #1e1e30; border-radius: 8px; padding: 1rem; }
+    label { font-size: 11px; color: #888; display: block; margin-bottom: .25rem; }
+    .flex { display: flex; gap: .5rem; align-items: center; }
+    .status { font-size: 11px; margin-left: .5rem; }
+  </style>
+</head>
+<body>
+
+<h1 style="color:#e8365d;font-size:16px;margin-bottom:1rem">Kicen Xensai — API Debugger</h1>
+<div style="background:#1a0a00;border:1px solid #e8365d33;border-radius:6px;padding:.6rem .9rem;margin-bottom:1rem;font-size:11px;color:#e8a836">
+  Buka halaman ini lalu test tiap endpoint. Lihat hasilnya untuk tau format data yang benar.
+</div>
+
+<!-- 1. HOME -->
+<div class="section">
+  <h2>1. GET / (Homepage)</h2>
+  <button onclick="testHome()">Test Endpoint</button>
+  <span class="status" id="s1"></span>
+  <pre id="r1">Belum ditest</pre>
+</div>
+
+<!-- 2. SEARCH -->
+<div class="section">
+  <h2>2. GET /search/&lt;query&gt;</h2>
+  <label>Query:</label>
+  <div class="flex">
+    <input id="q-search" value="perfect world" style="width:auto;flex:1"/>
+    <button onclick="testSearch()">Test</button>
+    <span class="status" id="s2"></span>
+  </div>
+  <pre id="r2">Belum ditest</pre>
+</div>
+
+<!-- 3. DETAIL SERIES -->
+<div class="section">
+  <h2>3. GET /&lt;series-slug&gt; (Detail Series)</h2>
+  <label>Series slug (bukan episode slug!):</label>
+  <div class="flex">
+    <input id="q-detail" value="perfect-world" style="width:auto;flex:1"/>
+    <button onclick="testDetail()">Test</button>
+    <span class="status" id="s3"></span>
+  </div>
+  <pre id="r3">Belum ditest</pre>
+</div>
+
+<!-- 4. EPISODE DETAIL -->
+<div class="section">
+  <h2>4. GET /episode/&lt;episode-slug&gt;</h2>
+  <label>Episode slug (copy dari card):</label>
+  <div class="flex">
+    <input id="q-ep" value="perfect-world-episode-260-subtitle-indonesia" style="width:auto;flex:1"/>
+    <button onclick="testEpisode()">Test</button>
+    <span class="status" id="s4"></span>
+  </div>
+  <pre id="r4">Belum ditest</pre>
+</div>
+
+<!-- 5. VIDEO SOURCE -->
+<div class="section">
+  <h2>5. GET /video-source/&lt;episode-slug&gt;</h2>
+  <label>Episode slug:</label>
+  <div class="flex">
+    <input id="q-vs" value="perfect-world-episode-260-subtitle-indonesia" style="width:auto;flex:1"/>
+    <button onclick="testVideoSource()">Test</button>
+    <span class="status" id="s5"></span>
+  </div>
+  <pre id="r5">Belum ditest</pre>
+</div>
+
+<!-- 6. GENRE LIST -->
+<div class="section">
+  <h2>6. GET /genres</h2>
+  <button onclick="testGenres()">Test Endpoint</button>
+  <span class="status" id="s6"></span>
+  <pre id="r6">Belum ditest</pre>
+</div>
+
+<!-- 7. ANIME LIST -->
+<div class="section">
+  <h2>7. GET /anime?page=1</h2>
+  <button onclick="testAnimeList()">Test Endpoint</button>
+  <span class="status" id="s7"></span>
+  <pre id="r7">Belum ditest</pre>
+</div>
+
+<!-- 8. CUSTOM -->
+<div class="section">
+  <h2>8. Custom Endpoint</h2>
+  <label>Full path (contoh: /genre/action):</label>
+  <div class="flex">
+    <input id="q-custom" value="/genre/action" style="width:auto;flex:1"/>
+    <button onclick="testCustom()">Test</button>
+    <span class="status" id="s8"></span>
+  </div>
+  <pre id="r8">Belum ditest</pre>
+</div>
+
+<script>
+const BASE = 'https://anichin-api-production.up.railway.app';
+
+async function call(path, statusId, resultId) {
+  const s = document.getElementById(statusId);
+  const r = document.getElementById(resultId);
+  s.textContent = 'Loading...';
+  s.className = 'status';
+  r.textContent = 'Loading...';
+  try {
+    const t0 = Date.now();
+    const res = await fetch(BASE + path);
+    const ms = Date.now() - t0;
+    const text = await res.text();
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+    s.textContent = `✓ ${res.status} (${ms}ms)`;
+    s.className = 'status ok';
+    r.textContent = JSON.stringify(parsed, null, 2);
+    return parsed;
+  } catch(e) {
+    s.textContent = `✗ ${e.message}`;
+    s.className = 'status err';
+    r.textContent = 'ERROR: ' + e.message;
+    return null;
+  }
+}
+
+async function testHome()        { await call('/', 's1', 'r1'); }
+async function testSearch()      { await call('/search/' + encodeURIComponent(document.getElementById('q-search').value), 's2', 'r2'); }
+async function testDetail()      { await call('/' + document.getElementById('q-detail').value, 's3', 'r3'); }
+async function testEpisode()     { await call('/episode/' + document.getElementById('q-ep').value, 's4', 'r4'); }
+async function testVideoSource() { await call('/video-source/' + document.getElementById('q-vs').value, 's5', 'r5'); }
+async function testGenres()      { await call('/genres', 's6', 'r6'); }
+async function testAnimeList()   { await call('/anime?page=1', 's7', 'r7'); }
+async function testCustom()      { await call(document.getElementById('q-custom').value, 's8', 'r8'); }
+
+// Auto-test homepage on load
+window.onload = () => testHome();
+</script>
+</body>
+</html>
