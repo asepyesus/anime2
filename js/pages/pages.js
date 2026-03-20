@@ -374,114 +374,71 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
   App.page(`<div class="center-spinner"><div class="spinner"></div></div>`, true);
 
   try {
-    // Get video sources for this episode
-    // Fetch episode info and video sources in parallel
-    const [vsRes, epRes] = await Promise.all([
-      fetch(`${API_BASE}/video-source/${encodeURIComponent(slug)}`),
-      fetch(`${API_BASE}/episode/${encodeURIComponent(slug)}`),
+    // Fetch episode info + series info in parallel
+    const [epRes, sRes] = await Promise.all([
+      fetch(`${API_BASE}/episode/${slug}`),
+      back ? fetch(`${API_BASE}/${back}`) : Promise.resolve(null),
     ]);
-    
-    const vsData = await vsRes.json();
+
     const epData = await epRes.json();
     const epInfo = epData.result || {};
-    
-    // Build sources list
-    let sources = [];
-    
-    // Try API video sources first
-    if (vsRes.ok && vsData.result) {
-      const raw = vsData.result;
-      if (Array.isArray(raw)) sources = raw;
-      else if (Array.isArray(raw.sources)) sources = raw.sources;
-      else if (Array.isArray(raw.servers)) sources = raw.servers;
-      else if (raw.url || raw.src) sources = [raw];
-    }
-    
-    // Always add Anichin embed as fallback (works for all episodes)
-    // Anichin episode page URL pattern: https://anichin.moe/<slug>/
-    const anichinEmbed = `https://anichin.moe/${slug}/`;
-    sources.push({ 
-      name: 'Anichin', 
-      src: anichinEmbed,
-      url: anichinEmbed 
-    });
 
-    // Get series info for episode list
+    // Normalize series episodes
     let seriesEps = [];
     let seriesTitle = epInfo.anime_title || epInfo.series_title || epInfo.title || '';
-    if (back) {
-      try {
-        const sRes  = await fetch(`${API_BASE}/${back}`);
-        const sData = await sRes.json();
-        const r = sData.result || {};
-        // API uses "episode" (singular) not "episodes"
-        const rawEps = r.episode || r.episodes || [];
-        seriesEps   = Array.isArray(rawEps) ? rawEps : [];
-        seriesTitle = r.title || r.name || seriesTitle;
-      } catch(e) { console.warn('series fetch failed', e); }
+    if (sRes) {
+      const sData = await sRes.json();
+      const r = sData.result || {};
+      const raw = r.episode || r.episodes || [];
+      seriesEps   = Array.isArray(raw) ? raw : [];
+      seriesTitle = r.title || r.name || seriesTitle;
     }
 
-    // Save to history
-    _saveHistory({ slug:back||slug, epSlug:slug, title:seriesTitle, thumbnail:epInfo.thumbnail||epInfo.anime_thumbnail||'', ep:epInfo.episode_number||ep });
+    // Find prev/next episode
+    const curIdx = seriesEps.findIndex(e => e.slug === slug);
+    const prevEp = curIdx > 0 ? seriesEps[curIdx - 1] : null;
+    const nextEp = curIdx < seriesEps.length - 1 ? seriesEps[curIdx + 1] : null;
+    const epNum  = epInfo.episode || ep || '?';
 
-    // Find prev/next
-    // Safety: ensure seriesEps is always an array
-    if (!Array.isArray(seriesEps)) seriesEps = [];
-    const curIdx  = seriesEps.findIndex(e=>e.slug===slug);
-    const prevEp  = curIdx > 0 ? seriesEps[curIdx-1] : null;
-    const nextEp  = curIdx < seriesEps.length-1 ? seriesEps[curIdx+1] : null;
-
-    // Primary source (first available)
-    // Normalize primary source - check all possible URL fields
-    const primary = sources[0] || null;
+    // The Anichin embed URL - direct episode page
+    // Use anichin.care (mirror) which allows iframe better than .moe
+    const embedUrl = `https://anichin.care/${slug}/`;
 
     App.page(`
       <div class="watch-pg">
         <div class="watch-main">
 
-          <!-- PLAYER -->
-          <div class="watch-player" id="watch-player">
-            ${primary?.src || primary?.url || primary?.link || primary?.stream_url
-              ? `<iframe id="watch-iframe" 
-                  src="${primary.src||primary.url||primary.link||primary.stream_url}" 
-                  frameborder="0" 
-                  allow="autoplay;fullscreen;picture-in-picture;encrypted-media" 
-                  allowfullscreen 
-                  referrerpolicy="no-referrer"
-                ></iframe>`
-              : `<div class="no-video">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="2" width="20" height="20" rx="4"/><path d="m10 8 6 4-6 4V8z"/></svg>
-                  <p>Video tidak tersedia untuk episode ini</p>
-                  <span style="font-size:.75rem;color:var(--t3);margin-top:.25rem">${sources.length} sumber ditemukan</span>
-                </div>`
-            }
+          <!-- PLAYER: Anichin embed -->
+          <div class="watch-player">
+            <iframe
+              id="watch-iframe"
+              src="${embedUrl}"
+              frameborder="0"
+              scrolling="no"
+              allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+              allowfullscreen
+              referrerpolicy="no-referrer"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation allow-modals"
+            ></iframe>
           </div>
 
-          <!-- SERVER SWITCHER -->
-          ${sources.length > 1 ? `
-            <div class="server-bar">
-              <span class="server-label">Server:</span>
-              ${sources.map((src,i)=>{
-                const url = src.src||src.url||src.link||src.stream_url||'';
-                const label = src.server||src.name||src.quality||`Server ${i+1}`;
-                return `<button class="srv-btn${i===0?' on':''}" data-src="${url}" data-idx="${i}">${label}</button>`;
-              }).join('')}
-            </div>
-          ` : ''}
-
-          <!-- EP NAV -->
-          <div class="ep-nav">
-            ${prevEp ? `<a class="ep-nav-btn" data-go="/watch?slug=${encodeURIComponent(prevEp.slug)}&back=${encodeURIComponent(back)}">← Ep Sebelumnya</a>` : '<span></span>'}
-            ${nextEp ? `<a class="ep-nav-btn next" data-go="/watch?slug=${encodeURIComponent(nextEp.slug)}&back=${encodeURIComponent(back)}">Ep Selanjutnya →</a>` : '<span></span>'}
+          <!-- EP NAVIGATION -->
+          <div class="ep-nav-bar">
+            ${prevEp
+              ? `<a class="ep-nav-btn" data-go="/watch?slug=${encodeURIComponent(prevEp.slug)}&back=${encodeURIComponent(back)}">← Ep Sebelumnya</a>`
+              : `<span></span>`
+            }
+            <span class="ep-nav-info">${seriesTitle ? seriesTitle + ' · ' : ''}Ep ${epNum}</span>
+            ${nextEp
+              ? `<a class="ep-nav-btn next" data-go="/watch?slug=${encodeURIComponent(nextEp.slug)}&back=${encodeURIComponent(back)}">Ep Selanjutnya →</a>`
+              : `<span></span>`
+            }
           </div>
 
           <!-- INFO -->
           <div class="watch-info">
-            <div class="wi-title">${seriesTitle}</div>
-            <div class="wi-sub">
-              ${epInfo.episode_number?`Episode ${epInfo.episode_number}`:''}
-              ${epInfo.released?`· ${epInfo.released}`:''}
-            </div>
+            <div class="wi-title">${seriesTitle || slug}</div>
+            <div class="wi-sub">Episode ${epNum}${epInfo.date ? ' · ' + epInfo.date : ''}</div>
             <div class="wi-acts">
               ${back ? `<a class="wi-btn" data-go="/detail?slug=${encodeURIComponent(back)}">Detail Series</a>` : ''}
             </div>
@@ -514,31 +471,32 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
         ${seriesEps.length ? `
           <div class="watch-sidebar">
             <div class="wsb-head">${seriesEps.length} Episode</div>
-            <div class="wsb-ep-list" id="ep-list">
-              ${seriesEps.map((ep,i)=>`
-                <a class="wsb-ep${ep.slug===slug?' active':''}" data-go="/watch?slug=${encodeURIComponent(ep.slug)}&back=${encodeURIComponent(back)}">
-                  <span class="wsb-ep-num">Ep ${ep.episode_number||i+1}</span>
-                  ${ep.slug===slug?`<span class="wsb-dot"></span>`:''}
+            <div class="wsb-ep-list">
+              ${seriesEps.map((ep, i) => `
+                <a class="wsb-ep${ep.slug === slug ? ' active' : ''}"
+                   data-go="/watch?slug=${encodeURIComponent(ep.slug)}&back=${encodeURIComponent(back)}">
+                  <span class="wsb-ep-num">Ep ${ep.episode || i + 1}</span>
+                  ${ep.slug === slug ? '<span class="wsb-dot"></span>' : ''}
                 </a>
               `).join('')}
             </div>
           </div>
         ` : ''}
+
       </div>
     `, true);
 
-    // Scroll active ep
-    setTimeout(()=>document.querySelector('.wsb-ep.active')?.scrollIntoView({block:'nearest'}),100);
-
-    // Server switcher
-    document.querySelectorAll('.srv-btn').forEach(btn=>{
-      btn.addEventListener('click',()=>{
-        const iframe=document.getElementById('watch-iframe');
-        if(iframe && btn.dataset.src){ iframe.src=btn.dataset.src; }
-        document.querySelectorAll('.srv-btn').forEach(b=>b.classList.remove('on'));
-        btn.classList.add('on');
-      });
+    // Save to history
+    _saveHistory({
+      slug: back || slug,
+      epSlug: slug,
+      title: seriesTitle || slug,
+      thumbnail: epInfo.thumbnail || '',
+      ep: epNum,
     });
+
+    // Scroll to active episode
+    setTimeout(() => document.querySelector('.wsb-ep.active')?.scrollIntoView({ block: 'nearest' }), 100);
 
     // Comments
     if (window.DB) {
@@ -546,12 +504,16 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
       window.DB.listenComments(cid, renderComments.bind(null, cid));
       const ccInput = document.getElementById('cc-input');
       const ccChar  = document.getElementById('cc-char');
-      ccInput?.addEventListener('input',()=>{ const l=ccInput.value.length; if(l>300)ccInput.value=ccInput.value.slice(0,300); ccChar.textContent=`${Math.min(l,300)}/300`; });
-      document.getElementById('cc-send')?.addEventListener('click', async()=>{
-        const t=ccInput?.value.trim();
-        if(!t) return;
-        try { await window.DB.addComment(cid,t); ccInput.value=''; ccChar.textContent='0/300'; }
-        catch(e){ App.toast(e.message==='login'?'Login dulu ya':'Gagal kirim komentar','err'); }
+      ccInput?.addEventListener('input', () => {
+        const l = ccInput.value.length;
+        if (l > 300) ccInput.value = ccInput.value.slice(0, 300);
+        if (ccChar) ccChar.textContent = `${Math.min(l, 300)}/300`;
+      });
+      document.getElementById('cc-send')?.addEventListener('click', async () => {
+        const t = ccInput?.value.trim();
+        if (!t) return;
+        try { await window.DB.addComment(cid, t); ccInput.value = ''; if (ccChar) ccChar.textContent = '0/300'; }
+        catch(e) { App.toast(e.message === 'login' ? 'Login dulu ya' : 'Gagal kirim', 'err'); }
       });
     }
 
@@ -561,62 +523,15 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
         <h2>Debug Watch Error</h2>
         <div style="background:#0d0d1a;border:1px solid #333;border-radius:8px;padding:1rem;margin:1rem 0;font-family:monospace;font-size:.72rem;text-align:left;word-break:break-all;max-width:500px">
           <div style="color:#e8365d;margin-bottom:.5rem">Error: ${e.message}</div>
-          <div style="color:#888">Episode slug:<br/><span style="color:#eee">${slug}</span></div>
-          <div style="color:#888;margin-top:.3rem">Series (back):<br/><span style="color:#eee">${back}</span></div>
-          <div style="color:#888;margin-top:.3rem">video-source URL:<br/><span style="color:#00d4a8">${API_BASE}/video-source/${slug}</span></div>
+          <div style="color:#888">Slug: <span style="color:#eee">${slug}</span></div>
+          <div style="color:#888;margin-top:.3rem">Back: <span style="color:#eee">${back}</span></div>
         </div>
-        <p style="color:var(--t3);font-size:.78rem;max-width:380px;text-align:center">Screenshot dan kirim ke developer</p>
         <a data-go="/browse" class="btn-main" style="margin-top:1rem">Kembali</a>
       </div>
     `, true);
   }
 };
 
-function _saveHistory(item) {
-  try {
-    const h = JSON.parse(localStorage.getItem('kx_hist')||'[]');
-    const idx = h.findIndex(x=>x.slug===item.slug);
-    if(idx>-1) h.splice(idx,1);
-    h.unshift(item);
-    localStorage.setItem('kx_hist', JSON.stringify(h.slice(0,20)));
-  } catch {}
-}
-
-function renderComments(cid, comments) {
-  const el=document.getElementById('comment-list');
-  if(!el) return;
-  if(!comments.length){ el.innerHTML=`<p class="empty">Belum ada komentar.</p>`; return; }
-  el.innerHTML=`<div class="c-count">${comments.length} komentar</div>`+comments.map(c=>`
-    <div class="c-item">
-      ${c.photo?`<img class="ava sm" src="${c.photo}" alt="${c.name}"/>`:`<div class="ava ph sm">${(c.name||'?').charAt(0)}</div>`}
-      <div class="c-body">
-        <div class="c-head"><span class="c-name">${c.name}</span><span class="c-time">${_fmtTime(c.createdAt)}</span>
-          ${window.Auth?.current?.uid===c.uid||window.Auth?.isAdmin()?`<button class="c-del" data-id="${c.id}">Hapus</button>`:''}
-        </div>
-        <p class="c-text">${_esc(c.text)}</p>
-        <div class="c-acts">
-          <button class="c-react" data-id="${c.id}" data-t="like"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3H14z"/><path d="M7 22H4a2 2 0 01-2-2v-7a2 2 0 012-2h3"/></svg>${c.likes||0}</button>
-          <button class="c-react" data-id="${c.id}" data-t="dislike"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 003 3l4-9V2H5.72a2 2 0 00-2 1.7l-1.38 9a2 2 0 002 2.3H10z"/></svg>${c.dislikes||0}</button>
-          ${window.Auth?.current?`<button class="c-reply-btn" data-id="${c.id}">Balas</button>`:''}
-        </div>
-        <div class="c-reply-wrap" id="crw-${c.id}" style="display:none">
-          <textarea class="c-reply-input" placeholder="Balas..." rows="2"></textarea>
-          <button class="c-reply-send" data-id="${c.id}">Kirim</button>
-        </div>
-        ${c.replies?.length?`<div class="c-replies">${c.replies.map(r=>`
-          <div class="c-rep">
-            ${r.photo?`<img class="ava sm" src="${r.photo}"/>`:`<div class="ava ph sm">${(r.name||'?').charAt(0)}</div>`}
-            <div class="c-body"><div class="c-head"><span class="c-name">${r.name}</span><span class="c-time">${_fmtTime(r.at)}</span></div><p class="c-text">${_esc(r.text)}</p></div>
-          </div>`).join('')}</div>`:''}
-      </div>
-    </div>
-  `).join('');
-
-  el.querySelectorAll('.c-del').forEach(b=>b.addEventListener('click',async()=>{ if(!confirm('Hapus?'))return; await window.DB.deleteComment(b.dataset.id); }));
-  el.querySelectorAll('.c-react').forEach(b=>b.addEventListener('click',async()=>{ if(!window.Auth?.current){Router.go('/auth');return;} try{await window.DB.reactComment(b.dataset.id,b.dataset.t);}catch{} }));
-  el.querySelectorAll('.c-reply-btn').forEach(b=>b.addEventListener('click',()=>{ const w=document.getElementById(`crw-${b.dataset.id}`); if(w)w.style.display=w.style.display==='none'?'block':'none'; }));
-  el.querySelectorAll('.c-reply-send').forEach(b=>b.addEventListener('click',async()=>{ const w=document.getElementById(`crw-${b.dataset.id}`); const t=w?.querySelector('textarea')?.value.trim(); if(!t)return; try{await window.DB.addReply(b.dataset.id,t);w.style.display='none';}catch(e){App.toast(e.message,'err');} }));
-}
 
 // ─── SEARCH ───────────────────────────────────────────────────────────────────
 Pages.search = async function({ q='' }) {
