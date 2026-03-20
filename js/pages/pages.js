@@ -368,6 +368,88 @@ Pages.detail = async function({ slug }) {
 };
 
 // ─── WATCH ────────────────────────────────────────────────────────────────────
+// ─── RENDER COMMENTS ─────────────────────────────────────────────────────────
+function renderComments(cid, comments) {
+  const el = document.getElementById('comment-list');
+  if (!el) return;
+  if (!comments.length) { el.innerHTML = `<p class="empty">Belum ada komentar.</p>`; return; }
+  el.innerHTML = `<div class="c-count">${comments.length} komentar</div>` + comments.map(c => `
+    <div class="c-item">
+      ${c.photo ? `<img class="ava sm" src="${c.photo}" alt="${c.name}"/>` : `<div class="ava ph sm">${(c.name||'?').charAt(0)}</div>`}
+      <div class="c-body">
+        <div class="c-head">
+          <span class="c-name">${c.name}</span>
+          <span class="c-time">${_fmtTime(c.createdAt)}</span>
+          ${window.Auth?.current?.uid===c.uid||window.Auth?.isAdmin() ? `<button class="c-del" data-id="${c.id}">Hapus</button>` : ''}
+        </div>
+        <p class="c-text">${_esc(c.text)}</p>
+        <div class="c-acts">
+          <button class="c-react" data-id="${c.id}" data-t="like">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3H14z"/></svg>
+            ${c.likes||0}
+          </button>
+          <button class="c-react" data-id="${c.id}" data-t="dislike">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 003 3l4-9V2H5.72a2 2 0 00-2 1.7l-1.38 9a2 2 0 002 2.3H10z"/></svg>
+            ${c.dislikes||0}
+          </button>
+          ${window.Auth?.current ? `<button class="c-reply-btn" data-id="${c.id}">Balas</button>` : ''}
+        </div>
+        <div class="c-reply-wrap" id="crw-${c.id}" style="display:none">
+          <textarea class="c-reply-input" placeholder="Balas..." rows="2"></textarea>
+          <button class="c-reply-send" data-id="${c.id}">Kirim</button>
+        </div>
+        ${c.replies?.length ? `<div class="c-replies">${c.replies.map(r=>`
+          <div class="c-rep">
+            ${r.photo?`<img class="ava sm" src="${r.photo}"/>`:`<div class="ava ph sm">${(r.name||'?').charAt(0)}</div>`}
+            <div class="c-body">
+              <div class="c-head"><span class="c-name">${r.name}</span><span class="c-time">${_fmtTime(r.at)}</span></div>
+              <p class="c-text">${_esc(r.text)}</p>
+            </div>
+          </div>`).join('')}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+
+  el.querySelectorAll('.c-del').forEach(b => b.addEventListener('click', async () => { if(!confirm('Hapus?'))return; await window.DB.deleteComment(b.dataset.id); }));
+  el.querySelectorAll('.c-react').forEach(b => b.addEventListener('click', async () => { if(!window.Auth?.current){Router.go('/auth');return;} try{await window.DB.reactComment(b.dataset.id,b.dataset.t);}catch{} }));
+  el.querySelectorAll('.c-reply-btn').forEach(b => b.addEventListener('click', () => { const w=document.getElementById(`crw-${b.dataset.id}`); if(w) w.style.display=w.style.display==='none'?'block':'none'; }));
+  el.querySelectorAll('.c-reply-send').forEach(b => b.addEventListener('click', async () => { const w=document.getElementById(`crw-${b.dataset.id}`); const t=w?.querySelector('textarea')?.value.trim(); if(!t)return; try{await window.DB.addReply(b.dataset.id,t);w.style.display='none';}catch(e){App.toast(e.message,'err');} }));
+}
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
+function _saveHistory(item) {
+  try {
+    const h = JSON.parse(localStorage.getItem('kx_hist') || '[]');
+    const idx = h.findIndex(x => x.slug === item.slug);
+    if (idx > -1) h.splice(idx, 1);
+    h.unshift(item);
+    localStorage.setItem('kx_hist', JSON.stringify(h.slice(0, 20)));
+  } catch {}
+}
+
+function _fmtTime(ts) {
+  if (!ts) return '';
+  try {
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    const diff = (Date.now() - d) / 1000;
+    if (diff < 60) return 'Baru saja';
+    if (diff < 3600) return `${Math.floor(diff/60)} menit lalu`;
+    if (diff < 86400) return `${Math.floor(diff/3600)} jam lalu`;
+    return `${Math.floor(diff/86400)} hari lalu`;
+  } catch { return ''; }
+}
+
+function _fmtAdminTime(ts) {
+  try {
+    const d = ts?.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleDateString('id-ID', { day:'numeric', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  } catch { return ''; }
+}
+
+function _esc(t = '') {
+  return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 Pages.watch = async function({ slug, back='', ep='1' }) {
   if (!slug) { Router.go('/browse'); return; }
   App.nav();
