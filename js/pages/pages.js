@@ -551,8 +551,19 @@ Pages.watch = async function({ slug, back='', ep='1' }) {
     }
 
   } catch(e) {
-    console.error(e);
-    App.page(`<div class="pg-err"><h2>Gagal memuat video.</h2><a data-go="/browse" class="btn-main">Kembali</a></div>`, true);
+    App.page(`
+      <div class="pg-err">
+        <h2>Debug Watch Error</h2>
+        <div style="background:#0d0d1a;border:1px solid #333;border-radius:8px;padding:1rem;margin:1rem 0;font-family:monospace;font-size:.72rem;text-align:left;word-break:break-all;max-width:500px">
+          <div style="color:#e8365d;margin-bottom:.5rem">Error: ${e.message}</div>
+          <div style="color:#888">Episode slug:<br/><span style="color:#eee">${slug}</span></div>
+          <div style="color:#888;margin-top:.3rem">Series (back):<br/><span style="color:#eee">${back}</span></div>
+          <div style="color:#888;margin-top:.3rem">video-source URL:<br/><span style="color:#00d4a8">${API_BASE}/video-source/${slug}</span></div>
+        </div>
+        <p style="color:var(--t3);font-size:.78rem;max-width:380px;text-align:center">Screenshot dan kirim ke developer</p>
+        <a data-go="/browse" class="btn-main" style="margin-top:1rem">Kembali</a>
+      </div>
+    `, true);
   }
 };
 
