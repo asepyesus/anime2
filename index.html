@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kicen Xensai — Anime · Donghua · Drakor · Dracin</title>
+  <meta name="description" content="Platform streaming anime, donghua, drama Korea, dan drama China terlengkap dengan subtitle Indonesia." />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+  <div id="global-loader"></div>
+  <div id="app-nav"></div>
+  <main id="app-content"></main>
+
+  <script src="js/config.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/router.js"></script>
+  <script src="js/components.js"></script>
+
+  <script type="module">
+    import { Auth, DB } from './js/firebase.js';
+    import { getFirestore, collection, getDocs, orderBy, query, limit } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+    import { getApps } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+
+    window.Auth = Auth;
+    window.DB = DB;
+
+    window._db_getDocs_comments = async () => {
+      const db = getFirestore(getApps()[0]);
+      const q = query(collection(db, 'comments'), orderBy('createdAt', 'desc'), limit(100));
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    };
+
+    const pageScripts = [
+      'js/app.js',
+      'js/pages/home.js',
+      'js/pages/browse.js',
+      'js/pages/detail.js',
+      'js/pages/search.js',
+      'js/pages/premium.js',
+      'js/pages/auth.js',
+      'js/pages/watch.js',
+      'js/pages/admin.js',
+      'js/pages/profile.js',
+    ];
+
+    async function loadScript(src) {
+      return new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = src; s.onload = res; s.onerror = rej;
+        document.body.appendChild(s);
+      });
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      window.Pages = {};
+      for (const src of pageScripts) {
+        try { await loadScript(src); } catch(e) { console.warn('Skip:', src, e); }
+      }
+
+      Auth.init((user) => {
+        const nav = document.getElementById('app-nav');
+        if (nav && nav.innerHTML) {
+          nav.innerHTML = Components.navbar(location.pathname + location.search);
+          window.App?.bindNav?.();
+        }
+      });
+
+      Router.register('/', Pages.home);
+      Router.register('/browse', Pages.browse);
+      Router.register('/detail', Pages.detail);
+      Router.register('/search', Pages.search);
+      Router.register('/premium', Pages.premium);
+      Router.register('/auth', Pages.auth);
+      Router.register('/watch', Pages.watch);
+      Router.register('/admin', Pages.admin);
+      Router.register('/profile', Pages.profile);
+      Router.register('/404', async () => {
+        App.render(`<div class="error-page"><h2>404 — Halaman tidak ditemukan</h2><a data-link="/" class="btn-watch">Kembali</a></div>`);
+      });
+
+      Router.init();
+    });
+  </script>
+</body>
+</html>
