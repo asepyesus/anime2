@@ -506,3 +506,55 @@ footer{margin-top:5rem;border-top:1px solid var(--border);background:var(--surf)
   .prem-plans{grid-template-columns:1fr}
   .land-h1{font-size:2.4rem}
 }
+
+/* ─── ADDITIONS & FIXES ──────────────────────────────────────────────────── */
+
+/* Splash enhanced */
+.sp-bg{position:absolute;inset:0;background:radial-gradient(ellipse 60% 50% at 50% 50%,rgba(232,54,93,.08),transparent)}
+.sp-content{position:relative;display:flex;flex-direction:column;align-items:center;gap:1.25rem}
+
+/* 404 page */
+.pg-err-num{font-size:5rem;font-weight:900;color:rgba(255,255,255,.06);line-height:1;margin-bottom:-.5rem}
+
+/* Browse search with icon */
+.browse-search{display:flex;align-items:center;gap:.65rem;max-width:400px;background:var(--card);border:1px solid var(--border);border-radius:9px;padding:.62rem 1rem;transition:border-color var(--tr)}
+.browse-search:focus-within{border-color:rgba(255,255,255,.22)}
+.browse-search svg{flex-shrink:0;color:var(--t3)}
+.browse-search input{flex:1;background:none;border:none;outline:none;color:var(--text);font-size:.9rem}
+.browse-search input::placeholder{color:var(--t3)}
+.browse-clear{color:var(--t3);font-size:.85rem;padding:.1rem .3rem;transition:color var(--tr);background:none}
+.browse-clear:hover{color:var(--text)}
+
+/* Card status badge */
+.card-status{position:absolute;top:7px;right:7px;font-size:.62rem;font-weight:600;padding:.12rem .38rem;border-radius:4px;letter-spacing:.04em}
+.card-status.on{background:rgba(0,212,168,.85);color:#000}
+
+/* Card meta row */
+.card-meta{display:flex;align-items:center;gap:.35rem;margin-top:.18rem}
+.card-rating{font-size:.65rem;color:var(--gold)}
+
+/* Footer socials */
+.ft-dev{margin-top:.3rem}
+.ft-socials{display:flex;flex-direction:column;gap:.28rem;margin-top:.55rem}
+.ft-social-link{display:inline-flex;align-items:center;gap:.45rem;font-size:.76rem;color:var(--t3);transition:color var(--tr)}
+.ft-social-link:hover{color:var(--t2)}
+
+/* Landing stats strip */
+.land-stats{display:flex;align-items:center;justify-content:center;gap:0;margin:4rem 2rem 0;background:var(--surf);border:1px solid var(--border);border-radius:14px;overflow:hidden}
+.stat-item{flex:1;text-align:center;padding:1.75rem 1rem}
+.stat-num{font-size:2rem;font-weight:800;color:var(--red)}
+.stat-lbl{font-size:.74rem;color:var(--t3);margin-top:.2rem}
+.stat-div{width:1px;background:var(--border);align-self:stretch}
+
+/* Home search button */
+.hg-search{width:36px;height:36px;border-radius:50%;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;color:var(--t2);transition:all var(--tr);cursor:pointer}
+.hg-search:hover{color:var(--text);border-color:rgba(255,255,255,.18)}
+
+/* Toast warn */
+#toast.warn{border-color:var(--gold);color:var(--gold)}
+
+@media(max-width:600px){
+  .land-stats{flex-direction:column;gap:0;margin:3rem 1.25rem 0}
+  .stat-div{width:auto;height:1px;align-self:stretch}
+  .stat-item{padding:1.25rem}
+}
