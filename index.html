@@ -1,77 +1,65 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
-  <title>Kicen Xensai</title>
-  <meta name="description" content="Nonton Anime, Donghua, Drakor, Dracin subtitle Indonesia" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/main.css" />
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1"/>
+  <title>Kicen Xensai — Donghua Sub Indonesia</title>
+  <meta name="description" content="Nonton donghua subtitle Indonesia terlengkap dan terupdate."/>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="css/style.css"/>
 </head>
 <body>
 
+  <!-- SPLASH -->
   <div id="splash">
-    <div class="splash-logo">
-      <div class="splash-icon">
-        <svg viewBox="0 0 60 60" fill="none">
-          <rect width="60" height="60" rx="14" fill="#E8365D"/>
-          <path d="M18 20v20l10-5 4 8 6-3-4-8 10-5L18 20z" fill="white" stroke="white" stroke-width="0.5" stroke-linejoin="round"/>
-        </svg>
-      </div>
-      <div class="splash-wordmark">KICEN<span>XENSAI</span></div>
+    <div class="sp-logo">
+      <svg viewBox="0 0 60 60" fill="none" width="72" height="72">
+        <rect width="60" height="60" rx="14" fill="#E8365D"/>
+        <path d="M18 20v20l10-5 4 8 6-3-4-8 10-5L18 20z" fill="white" stroke="white" stroke-width="0.5" stroke-linejoin="round"/>
+      </svg>
+      <div class="sp-name">KICEN<span>XENSAI</span></div>
     </div>
-    <div class="splash-bar"><div class="splash-fill"></div></div>
-    <div class="splash-sub">Anime · Donghua · Drakor · Dracin</div>
+    <div class="sp-bar"><div class="sp-fill"></div></div>
+    <div class="sp-sub">Donghua · Subtitle Indonesia</div>
   </div>
 
-  <div id="root" style="display:none">
-    <div id="app-nav"></div>
+  <!-- APP -->
+  <div id="app" style="display:none">
+    <div id="nav"></div>
     <div id="page"></div>
-    <div id="app-footer"></div>
+    <div id="footer"></div>
   </div>
 
   <div id="toast"></div>
+  <div id="bar"></div>
 
+  <!-- Core scripts -->
   <script src="js/config.js"></script>
-  <script src="js/api.js"></script>
   <script src="js/router.js"></script>
+  <script src="js/app.js"></script>
   <script src="js/ui.js"></script>
 
   <script type="module">
     import { Auth, DB } from './js/firebase.js';
 
-    // Expose globally - _user starts as undefined (= auth not yet resolved)
-    window.Auth   = Auth;
-    window.DB     = DB;
-    window._user  = undefined;
-
-    const pageScripts = [
-      'js/app.js',
-      'js/pages/landing.js',
-      'js/pages/home.js',
-      'js/pages/browse.js',   // browse + detail + watch + search
-      'js/pages/auth.js',     // auth + premium + profile + admin + support
-    ];
-
-    function loadScript(src) {
-      return new Promise(resolve => {
-        const s = document.createElement('script');
-        s.src = src;
-        s.onload = resolve;
-        s.onerror = () => { console.warn('Could not load:', src); resolve(); };
-        document.body.appendChild(s);
-      });
-    }
+    window.Auth  = Auth;
+    window.DB    = DB;
+    window._user = undefined; // undefined=pending, null=guest, object=logged in
 
     async function boot() {
       window.Pages = {};
 
-      // 1. Load all page scripts first
-      for (const src of pageScripts) await loadScript(src);
+      // Load all pages in one script
+      await new Promise((res,rej) => {
+        const s = document.createElement('script');
+        s.src = 'js/pages/pages.js';
+        s.onload = res; s.onerror = rej;
+        document.body.appendChild(s);
+      });
 
-      // 2. Register all routes (Pages.xxx now defined)
+      // Register routes
       Router.on('/',        Pages.landing);
       Router.on('/home',    Pages.home);
       Router.on('/browse',  Pages.browse);
@@ -83,38 +71,28 @@
       Router.on('/profile', Pages.profile);
       Router.on('/admin',   Pages.admin);
       Router.on('/support', Pages.support);
-      Router.on('/404', async () => {
-        UI.setPage(`<div class="pg-err"><h2>Halaman tidak ditemukan</h2><a data-go="/">Kembali</a></div>`);
-      });
+      Router.on('/404', ()=> App.page(`<div class="pg-err"><h2>Halaman tidak ditemukan</h2><a data-go="/" class="btn-main">Kembali</a></div>`));
 
-      // 3. Init Firebase auth — waits for first auth state resolution
+      // Init Firebase auth — resolve on first auth state
       await new Promise(resolve => {
-        let resolved = false;
+        let done = false;
         Auth.init(user => {
-          // Update navbar on every auth change
-          const nav = document.getElementById('app-nav');
-          if (nav && nav.innerHTML.trim()) UI.renderNav();
-
-          // Only start router on first resolution
-          if (!resolved) {
-            resolved = true;
-            resolve();
-          }
+          // Re-render nav on auth changes
+          const nav = document.getElementById('nav');
+          if (nav && nav.innerHTML.trim()) { nav.innerHTML = UI.navbar(); UI._bindNav(); }
+          if (!done) { done = true; resolve(); }
         });
-        // Safety: start anyway after 3s if Firebase is unreachable
-        setTimeout(() => { if (!resolved) { resolved = true; resolve(); } }, 3000);
+        setTimeout(() => { if(!done){done=true;resolve();} }, 3000);
       });
 
-      // 4. Show app, hide splash, start router
-      const splash = document.getElementById('splash');
-      if (splash) {
-        splash.classList.add('out');
-        setTimeout(() => {
-          splash.remove();
-          document.getElementById('root').style.display = '';
-          Router.start();
-        }, 600);
-      }
+      // Hide splash, show app, start router
+      const sp = document.getElementById('splash');
+      sp.classList.add('out');
+      setTimeout(() => {
+        sp.remove();
+        document.getElementById('app').style.display = '';
+        Router.start();
+      }, 600);
     }
 
     window.addEventListener('DOMContentLoaded', boot);
