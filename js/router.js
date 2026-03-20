@@ -1,45 +1,28 @@
 const Router = {
-  routes: {},
-  current: null,
+  _routes: {},
+  _cur: null,
 
-  register(path, handler) {
-    this.routes[path] = handler;
+  on(path, fn) { this._routes[path] = fn; },
+
+  async go(path, push=true) {
+    const [base, qs] = path.split('?');
+    const params = Object.fromEntries(new URLSearchParams(qs||''));
+    if (push && this._cur !== path) history.pushState({}, '', path);
+    this._cur = path;
+    const fn = this._routes[base] || this._routes['/404'];
+    if (!fn) return;
+    UI.setLoading(true);
+    window.scrollTo({top:0,behavior:'instant'});
+    try { await fn(params); } catch(e) { console.error(e); }
+    finally { UI.setLoading(false); }
   },
 
-  async navigate(path, push = true) {
-    if (push && this.current !== path) {
-      history.pushState({}, '', path);
-    }
-    this.current = path;
-
-    const [base, query] = path.split('?');
-    const params = Object.fromEntries(new URLSearchParams(query || ''));
-
-    const handler = this.routes[base] || this.routes['/404'];
-    if (handler) {
-      App.setLoading(true);
-      try {
-        await handler(params);
-      } finally {
-        App.setLoading(false);
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
-    }
-  },
-
-  init() {
-    window.addEventListener('popstate', () => {
-      this.navigate(location.pathname + location.search, false);
+  start() {
+    window.addEventListener('popstate', () => this.go(location.pathname+location.search, false));
+    document.addEventListener('click', e => {
+      const el = e.target.closest('[data-go]');
+      if (el) { e.preventDefault(); this.go(el.dataset.go); }
     });
-
-    document.addEventListener('click', (e) => {
-      const link = e.target.closest('[data-link]');
-      if (link) {
-        e.preventDefault();
-        this.navigate(link.dataset.link);
-      }
-    });
-
-    this.navigate(location.pathname + location.search, false);
+    this.go(location.pathname+location.search, false);
   },
 };

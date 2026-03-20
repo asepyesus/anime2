@@ -1,133 +1,126 @@
-Pages.home = async function () {
-  App.setPage('home');
-  App.render(`
-    <div id="hero-section">
-      <div class="hero-loading">
-        <div class="hero-skeleton"></div>
-      </div>
-    </div>
+Pages.home = async function() {
+  UI.renderNav();
+  const user = window._user;
+  if (!user) { Router.go('/'); return; }
 
-    <section class="section">
-      <div class="section-head">
-        <h2 class="section-title">Trending Minggu Ini</h2>
-      </div>
-      <div class="cards-grid" id="trending-grid">${Components.cardSkeleton(8)}</div>
-    </section>
+  const history = API.getHistory().slice(0, 8);
 
-    <section class="section">
-      <div class="section-head">
-        <h2 class="section-title">Anime Populer</h2>
-        <a class="see-all" data-link="/browse?cat=anime">Lihat Semua</a>
-      </div>
-      <div class="cards-grid" id="anime-grid">${Components.cardSkeleton(8)}</div>
-    </section>
+  UI.setPage(`
+    <div class="home-pg">
 
-    <section class="section">
-      <div class="section-head">
-        <h2 class="section-title">Drama Korea</h2>
-        <a class="see-all" data-link="/browse?cat=drakor">Lihat Semua</a>
-      </div>
-      <div class="cards-grid" id="drakor-grid">${Components.cardSkeleton(8)}</div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <h2 class="section-title">Drama China</h2>
-        <a class="see-all" data-link="/browse?cat=dracin">Lihat Semua</a>
-      </div>
-      <div class="cards-grid" id="dracin-grid">${Components.cardSkeleton(8)}</div>
-    </section>
-
-    <section class="section">
-      <div class="section-head">
-        <h2 class="section-title">Donghua</h2>
-        <a class="see-all" data-link="/browse?cat=donghua">Lihat Semua</a>
-      </div>
-      <div class="cards-grid" id="donghua-grid">${Components.cardSkeleton(8)}</div>
-    </section>
-  `);
-
-  // Load semua konten parallel
-  const [trending, anime, drakor, dracin, donghua] = await Promise.allSettled([
-    API.getTrendingAnime(),
-    API.getAnime(1),
-    API.getDrakor(1),
-    API.getDracin(1),
-    API.getDonghua(1),
-  ]);
-
-  // Hero slider
-  const heroItems = [];
-  if (anime.status === 'fulfilled') heroItems.push(...anime.value.results.slice(0, 3));
-  if (drakor.status === 'fulfilled') heroItems.push(...drakor.value.results.slice(0, 2));
-
-  if (heroItems.length > 0) {
-    // Ambil detail item pertama untuk hero
-    let heroData = heroItems[0];
-    if (heroData.type === 'anime') {
-      try {
-        heroData = await API.getAnimeDetail(heroData.id);
-      } catch (_) {}
-    } else {
-      try {
-        heroData = { ...heroData, ...await API.getTMDBDetail(heroData.id, 'tv') };
-      } catch (_) {}
-    }
-    renderHero(heroItems, heroData);
-  }
-
-  // Render grids
-  if (trending.status === 'fulfilled') {
-    document.getElementById('trending-grid').innerHTML = trending.value.slice(0, 8).map(Components.card).join('');
-  }
-  if (anime.status === 'fulfilled') {
-    document.getElementById('anime-grid').innerHTML = anime.value.results.slice(0, 8).map(Components.card).join('');
-  }
-  if (drakor.status === 'fulfilled') {
-    document.getElementById('drakor-grid').innerHTML = drakor.value.results.slice(0, 8).map(Components.card).join('');
-  }
-  if (dracin.status === 'fulfilled') {
-    document.getElementById('dracin-grid').innerHTML = dracin.value.results.slice(0, 8).map(Components.card).join('');
-  }
-  if (donghua.status === 'fulfilled') {
-    document.getElementById('donghua-grid').innerHTML = donghua.value.results.slice(0, 8).map(Components.card).join('');
-  }
-};
-
-function renderHero(items, featured) {
-  const heroSection = document.getElementById('hero-section');
-  if (!heroSection) return;
-
-  heroSection.innerHTML = `
-    <div class="hero">
-      <div class="hero-bg" style="--bg: url('${featured.backdrop || featured.poster || ''}')"></div>
-      <div class="hero-content">
-        <span class="hero-cat-badge">${featured.category?.toUpperCase() || 'FEATURED'}</span>
-        <h1 class="hero-main-title">${featured.title || ''}</h1>
-        <div class="hero-meta">
-          ${featured.rating ? `<span class="hero-rating">${featured.rating}</span>` : ''}
-          ${featured.year ? `<span>${featured.year}</span>` : ''}
-          ${featured.episodes ? `<span>${featured.episodes} Episode</span>` : ''}
-          ${featured.genres?.slice(0, 2).map(g => `<span>${g}</span>`).join('') || ''}
-        </div>
-        <p class="hero-overview">${(featured.overview || '').slice(0, 200)}${featured.overview?.length > 200 ? '...' : ''}</p>
-        <div class="hero-btns">
-          <a class="btn-watch" data-link="/detail?id=${featured.id}&type=${featured.type || 'tv'}&cat=${featured.category || 'anime'}">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
-            Tonton
-          </a>
-          <a class="btn-detail" data-link="/detail?id=${featured.id}&type=${featured.type || 'tv'}&cat=${featured.category || 'anime'}">
-            Detail
-          </a>
-        </div>
-      </div>
-      <div class="hero-thumb-strip">
-        ${items.slice(0, 5).map((item, i) => `
-          <div class="hero-thumb ${i === 0 ? 'active' : ''}" data-index="${i}" data-link="/detail?id=${item.id}&type=${item.type}&cat=${item.category}">
-            ${item.poster ? `<img src="${item.poster}" alt="${item.title}" loading="lazy" />` : '<div class="thumb-placeholder"></div>'}
+      <!-- GREETING -->
+      <div class="home-greet">
+        <div class="home-greet-left">
+          ${UI.avatar(user)}
+          <div>
+            <div class="hg-welcome">Selamat datang kembali,</div>
+            <div class="hg-name">${user.name||user.displayName||'Penonton'}</div>
           </div>
+        </div>
+        <a class="hg-search-btn" data-go="/search">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        </a>
+      </div>
+
+      <!-- ANNOUNCEMENT -->
+      <div class="home-announce">
+        <div class="ha-bar"></div>
+        <div class="ha-text">Platform ini terus diperbarui. Nikmati konten terbaru setiap hari.</div>
+      </div>
+
+      <!-- CONTINUE WATCHING -->
+      ${history.length ? `
+        <section class="home-section">
+          <div class="hsec-head">
+            <h2>Lanjutkan Nonton</h2>
+            <button class="hsec-more" id="clearHistory">Hapus Semua</button>
+          </div>
+          <div class="continue-row" id="continue-row">
+            ${history.map(item => `
+              <a class="cont-card" data-go="/watch?id=${item.id}&type=${item.type||'tv'}&cat=${item.category}&ep=${item.ep||1}">
+                <div class="cont-img">
+                  ${item.poster ? `<img src="${item.poster}" alt="${item.title}" loading="lazy"/>` : `<div class="cont-np">${item.title?.charAt(0)||'?'}</div>`}
+                  <div class="cont-shade"></div>
+                  <div class="cont-play">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  </div>
+                </div>
+                <div class="cont-info">
+                  <div class="cont-title">${item.title}</div>
+                  <div class="cont-sub">Episode ${item.ep||1}</div>
+                </div>
+              </a>
+            `).join('')}
+          </div>
+        </section>
+      ` : ''}
+
+      <!-- CATEGORIES QUICK -->
+      <div class="home-cats">
+        ${Object.entries(C.CATS).map(([k,v]) => `
+          <a class="home-cat" data-go="/browse?cat=${k}" style="--c:${v.color}">
+            <span>${v.label}</span>
+          </a>
         `).join('')}
       </div>
+
+      <!-- TRENDING ANIME -->
+      <section class="home-section">
+        <div class="hsec-head">
+          <h2>Trending Anime</h2>
+          <a class="hsec-more" data-go="/browse?cat=anime">Lihat semua</a>
+        </div>
+        <div id="home-anime">${UI.skel(8)}</div>
+      </section>
+
+      <!-- DRAKOR -->
+      <section class="home-section">
+        <div class="hsec-head">
+          <h2>Drama Korea</h2>
+          <a class="hsec-more" data-go="/browse?cat=drakor">Lihat semua</a>
+        </div>
+        <div id="home-drakor">${UI.skel(8)}</div>
+      </section>
+
+      <!-- DONGHUA -->
+      <section class="home-section">
+        <div class="hsec-head">
+          <h2>Donghua</h2>
+          <a class="hsec-more" data-go="/browse?cat=donghua">Lihat semua</a>
+        </div>
+        <div id="home-donghua">${UI.skel(8)}</div>
+      </section>
+
+      <!-- DRACIN -->
+      <section class="home-section">
+        <div class="hsec-head">
+          <h2>Drama China</h2>
+          <a class="hsec-more" data-go="/browse?cat=dracin">Lihat semua</a>
+        </div>
+        <div id="home-dracin">${UI.skel(8)}</div>
+      </section>
+
     </div>
-  `;
-}
+  `);
+
+  document.getElementById('clearHistory')?.addEventListener('click', () => {
+    localStorage.removeItem('kx_history');
+    document.getElementById('continue-row')?.closest('.home-section')?.remove();
+  });
+
+  const [anime, drakor, donghua, dracin] = await Promise.allSettled([
+    API.anime(1), API.drakor(1), API.donghua(1), API.dracin(1),
+  ]);
+
+  const render = (id, res) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = res.status==='fulfilled'
+      ? `<div class="cards-grid">${res.value.results.slice(0,8).map(UI.card).join('')}</div>`
+      : `<p class="empty-msg">Gagal memuat.</p>`;
+  };
+  render('home-anime', anime);
+  render('home-drakor', drakor);
+  render('home-donghua', donghua);
+  render('home-dracin', dracin);
+};

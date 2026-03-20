@@ -2,87 +2,110 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Kicen Xensai — Anime · Donghua · Drakor · Dracin</title>
-  <meta name="description" content="Platform streaming anime, donghua, drama Korea, dan drama China terlengkap dengan subtitle Indonesia." />
-  <link rel="stylesheet" href="css/style.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+  <title>Kicen Xensai</title>
+  <meta name="description" content="Nonton Anime, Donghua, Drakor, Dracin subtitle Indonesia" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Playfair+Display:wght@700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/main.css" />
 </head>
 <body>
 
-  <div id="global-loader"></div>
-  <div id="app-nav"></div>
-  <main id="app-content"></main>
+  <!-- SPLASH -->
+  <div id="splash">
+    <div class="splash-logo">
+      <div class="splash-icon">
+        <svg viewBox="0 0 60 60" fill="none">
+          <rect width="60" height="60" rx="14" fill="#E8365D"/>
+          <path d="M18 20v20l10-5 4 8 6-3-4-8 10-5L18 20z" fill="white" stroke="white" stroke-width="0.5" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="splash-wordmark">KICEN<span>XENSAI</span></div>
+    </div>
+    <div class="splash-bar"><div class="splash-fill"></div></div>
+    <div class="splash-sub">Anime · Donghua · Drakor · Dracin</div>
+  </div>
 
+  <!-- APP -->
+  <div id="root" style="display:none">
+    <div id="app-nav"></div>
+    <div id="page"></div>
+    <div id="app-footer"></div>
+  </div>
+
+  <!-- TOAST -->
+  <div id="toast"></div>
+
+  <!-- MODAL OVERLAY -->
+  <div id="modal-bg"></div>
+  <div id="modal-box"></div>
+
+  <!-- Scripts -->
   <script src="js/config.js"></script>
   <script src="js/api.js"></script>
   <script src="js/router.js"></script>
-  <script src="js/components.js"></script>
+  <script src="js/ui.js"></script>
 
   <script type="module">
     import { Auth, DB } from './js/firebase.js';
-    import { getFirestore, collection, getDocs, orderBy, query, limit } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+    import { getFirestore, collection, getDocs, query, orderBy, limit, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, increment, setDoc, getDoc, serverTimestamp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
     import { getApps } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
 
     window.Auth = Auth;
     window.DB = DB;
 
-    window._db_getDocs_comments = async () => {
-      const db = getFirestore(getApps()[0]);
-      const q = query(collection(db, 'comments'), orderBy('createdAt', 'desc'), limit(100));
-      const snap = await getDocs(q);
-      return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // Expose Firestore helpers globally for page scripts
+    window._fs = {
+      getFirestore, collection, getDocs, query, orderBy, limit, where,
+      onSnapshot, addDoc, deleteDoc, doc, updateDoc, increment,
+      setDoc, getDoc, serverTimestamp,
+      db: () => getFirestore(getApps()[0])
     };
 
-    const pageScripts = [
-      'js/app.js',
-      'js/pages/home.js',
-      'js/pages/browse.js',
-      'js/pages/detail.js',
-      'js/pages/search.js',
-      'js/pages/premium.js',
-      'js/pages/auth.js',
-      'js/pages/watch.js',
-      'js/pages/admin.js',
-      'js/pages/profile.js',
-    ];
+    const pages = ['app','landing','home','browse','detail','watch','search','auth','premium','profile','admin','support'];
 
-    async function loadScript(src) {
-      return new Promise((res, rej) => {
-        const s = document.createElement('script');
-        s.src = src; s.onload = res; s.onerror = rej;
-        document.body.appendChild(s);
-      });
-    }
-
-    window.addEventListener('DOMContentLoaded', async () => {
+    async function boot() {
       window.Pages = {};
-      for (const src of pageScripts) {
-        try { await loadScript(src); } catch(e) { console.warn('Skip:', src, e); }
+      for (const p of pages) {
+        await new Promise((ok, fail) => {
+          const s = document.createElement('script');
+          s.src = p === 'app' ? `js/${p}.js` : `js/pages/${p}.js`;
+          s.onload = ok; s.onerror = () => { console.warn('skip', p); ok(); };
+          document.body.appendChild(s);
+        });
       }
 
+      // Auth listener
       Auth.init((user) => {
-        const nav = document.getElementById('app-nav');
-        if (nav && nav.innerHTML) {
-          nav.innerHTML = Components.navbar(location.pathname + location.search);
-          window.App?.bindNav?.();
-        }
+        window._user = user;
+        UI.renderNav();
       });
 
-      Router.register('/', Pages.home);
-      Router.register('/browse', Pages.browse);
-      Router.register('/detail', Pages.detail);
-      Router.register('/search', Pages.search);
-      Router.register('/premium', Pages.premium);
-      Router.register('/auth', Pages.auth);
-      Router.register('/watch', Pages.watch);
-      Router.register('/admin', Pages.admin);
-      Router.register('/profile', Pages.profile);
-      Router.register('/404', async () => {
-        App.render(`<div class="error-page"><h2>404 — Halaman tidak ditemukan</h2><a data-link="/" class="btn-watch">Kembali</a></div>`);
+      // Register routes
+      Router.on('/', Pages.landing);
+      Router.on('/home', Pages.home);
+      Router.on('/browse', Pages.browse);
+      Router.on('/detail', Pages.detail);
+      Router.on('/watch', Pages.watch);
+      Router.on('/search', Pages.search);
+      Router.on('/auth', Pages.auth);
+      Router.on('/premium', Pages.premium);
+      Router.on('/profile', Pages.profile);
+      Router.on('/admin', Pages.admin);
+      Router.on('/support', Pages.support);
+      Router.on('/404', () => {
+        UI.setPage(`<div class="pg-err"><h2>Halaman tidak ditemukan</h2><a data-go="/">Kembali</a></div>`);
       });
 
-      Router.init();
-    });
+      // Show app, hide splash after 2s
+      setTimeout(() => {
+        const splash = document.getElementById('splash');
+        if (splash) { splash.classList.add('out'); setTimeout(() => { splash.remove(); document.getElementById('root').style.display = ''; Router.start(); }, 600); }
+      }, 2200);
+    }
+
+    window.addEventListener('DOMContentLoaded', boot);
   </script>
 </body>
 </html>
